@@ -43,13 +43,20 @@ const Home = () => {
           arr.map(async (pid) => {
             try {
               const res = await getProperty(pid);
-              return res.data?.property || null;
+              return { pid, property: res.data?.property || null };
             } catch {
-              return null;
+              // Property not found (deleted) — return null marker
+              return { pid, property: null };
             }
           })
         );
-        setRecentlyViewed(results.filter(Boolean));
+
+        // Filter out deleted properties and clean stale IDs from localStorage
+        const validIds = results.filter(r => r.property).map(r => r.pid);
+        if (validIds.length !== arr.length) {
+          localStorage.setItem(key, JSON.stringify(validIds));
+        }
+        setRecentlyViewed(results.map(r => r.property).filter(Boolean));
       } catch {
         setRecentlyViewed([]);
       } finally {

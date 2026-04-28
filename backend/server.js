@@ -1,4 +1,6 @@
 import express from 'express';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import mongoose from 'mongoose';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -20,29 +22,33 @@ import adminRoutes from './routes/adminRoutes.js';
 
 // Import config
 import connectDB from './config/db.js';
+import { initializeAllKeys } from './crypto/keyManager.js';
 
 // Load environment variables from root directory
 dotenv.config({ path: '../.env' });
 
-// Connect to database
-connectDB();
+// Connect to database and initialize encryption keys
+const startServer = async () => {
+  await connectDB();
+  await initializeAllKeys();
+};
 
 const app = express();
 
 // Security middleware
 app.use(helmet({
-  contentSecurityPolicy: false // Allow inline styles for development
+  contentSecurityPolicy: false
 }));
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   message: 'Too many requests from this IP, please try again later.'
 });
 app.use('/api/auth', limiter);
 
-// CORS configuration (support common dev origins and env override)
+// CORS configuration
 const allowedOrigins = [
   process.env.CLIENT_URL,
   'http://localhost:5173',
@@ -54,11 +60,9 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (e.g., mobile apps, curl) and allowed dev origins
     if (!origin || allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
-    // Fallback: allow other origins in development
     if (process.env.NODE_ENV !== 'production') {
       return callback(null, true);
     }
@@ -69,7 +73,7 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Body parsing middleware (increase limit for base64 images)
+// Body parsing middleware
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
@@ -106,6 +110,20 @@ app.get('/api/health', (req, res) => {
   res.json({ message: 'Server is running', timestamp: new Date().toISOString() });
 });
 
+// Serve frontend static files in production
+if (process.env.NODE_ENV === 'production') {
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
+  const distPath = path.join(__dirname, '../frontend/dist');
+
+  app.use(express.static(distPath));
+
+  // Serve index.html for non-API routes (client-side routing)
+  app.get(/^\/(?!api).*/, (req, res) => {
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
+}
+
 // Global error handler
 app.use((err, req, res, next) => {
   console.error(err.stack);
@@ -122,7 +140,35 @@ app.use('*', (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV}`);
+startServer().then(() => {
+  const server = app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV}`);
+  });
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`Port ${PORT} is already in use. Kill the process and try again.`);
+      process.exit(1);
+    } else {
+      console.error('Server error:', err);
+      process.exit(1);
+    }
+  });
+
+  // Only register graceful shutdown in production
+  // In dev, nodemon handles restart — SIGTERM handler kills in-flight requests
+  if (process.env.NODE_ENV === 'production') {
+    const shutdown = () => {
+      console.log('\n[Server] Shutting down gracefully...');
+      server.close(() => { process.exit(0); });
+      setTimeout(() => process.exit(0), 5000);
+    };
+    process.on('SIGTERM', shutdown);
+    process.on('SIGINT', shutdown);
+  }
+
+}).catch(err => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
 });

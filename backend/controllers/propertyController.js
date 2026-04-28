@@ -82,6 +82,8 @@ import Property from '../models/Property.js';
 import User from '../models/User.js';
 import Booking from '../models/Booking.js';
 import Review from '../models/Review.js';
+import Notification from '../models/Notification.js';
+import LeaveRequest from '../models/LeaveRequest.js';
 
 // @desc Get all properties with filters
 // @route GET /api/properties
@@ -469,7 +471,7 @@ export const updateProperty = async (req, res) => {
   }
 };
 
-// @desc Delete property
+// @desc Delete property (hard delete + cascade)
 // @route DELETE /api/properties/:id
 // @access Private (Owner of property, Admin)
 export const deleteProperty = async (req, res) => {
@@ -485,10 +487,29 @@ export const deleteProperty = async (req, res) => {
       return res.status(403).json({ message: 'Access denied' });
     }
 
-    // Soft delete by setting isActive to false
-    await Property.findByIdAndUpdate(req.params.id, { isActive: false });
+    const propertyId = property._id;
 
-    res.json({ message: 'Property deleted successfully' });
+    // ── Cascade delete all related data ─────────────────────────────────────
+    await Promise.all([
+      // Delete all bookings for this property
+      Booking.deleteMany({ property: propertyId }),
+      // Delete all reviews for this property
+      Review.deleteMany({ property: propertyId }),
+      // Delete all notifications that reference this property
+      Notification.deleteMany({ 'meta.propertyId': propertyId }),
+      // Delete leave requests tied to this property
+      LeaveRequest.deleteMany({ property: propertyId }),
+      // Remove property from every user's favourites array
+      User.updateMany(
+        { 'favourites.itemId': propertyId },
+        { $pull: { favourites: { itemId: propertyId } } }
+      ),
+    ]);
+
+    // Hard delete the property itself
+    await Property.findByIdAndDelete(propertyId);
+
+    res.json({ message: 'Property and all related data deleted successfully' });
 
   } catch (error) {
     console.error('Delete property error:', error);

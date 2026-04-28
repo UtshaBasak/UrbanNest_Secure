@@ -26,6 +26,23 @@ import Compare from './pages/Compare';
 import ProtectedRoute from './components/ProtectedRoute';
 import LeaveRequests from './pages/LeaveRequests';
 import LeaveRequestNew from './pages/LeaveRequestNew';
+import ForgotPassword from './pages/ForgotPassword';
+import ForceChangePassword from './pages/ForceChangePassword';
+
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from './context/AuthContext';
+
+// Redirects users with expired passwords to the force-change screen
+function PasswordExpiryGuard({ children }) {
+  const { user, passwordExpired } = useAuth();
+  const navigate = useNavigate();
+  React.useEffect(() => {
+    if (user && passwordExpired) {
+      navigate('/force-change-password', { replace: true });
+    }
+  }, [user, passwordExpired, navigate]);
+  return children;
+}
 
 function App() {
   return (
@@ -33,9 +50,10 @@ function App() {
       <AuthProvider>
         <Router>
           <div className="min-h-screen bg-neutral-50 dark:bg-neutral-900 transition-colors duration-200">
-            <Navbar />
-            <main className="pt-20">
-              <Routes>
+            <PasswordExpiryGuard>
+              <Navbar />
+              <main className="pt-20">
+                <Routes>
                 <Route path="/compare" element={<Compare />} />
                 <Route path="/" element={<Home />} />
                 <Route path="/properties" element={<Properties />} />
@@ -63,6 +81,8 @@ function App() {
                 <Route path="/owners/:id/properties" element={<OwnerProperties />} />
                 {/* Map page removed */}
                 <Route path="/login" element={<Login />} />
+                <Route path="/forgot-password" element={<ForgotPassword />} />
+                <Route path="/force-change-password" element={<ForceChangePassword />} />
                 <Route path="/register" element={<Register />} />
                 <Route path="/users/:id" element={<UserProfile />} />
                 <Route path="/users/:id/ratings" element={<UserRatings />} />
@@ -135,7 +155,8 @@ function App() {
                   }
                 />
               </Routes>
-            </main>
+              </main>
+            </PasswordExpiryGuard>
           </div>
         </Router>
       </AuthProvider>

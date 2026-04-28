@@ -1,283 +1,181 @@
-// @desc Update user profile (self or admin)
-// @route PUT /api/users/:id
-// @access Private (Self or Admin)
-export const updateUserProfile = async (req, res) => {
-  try {
-    const targetId = req.params.id;
-    const isSelf = req.user && (req.user.id === targetId || String(req.user._id) === String(targetId));
-    const isAdmin = req.user && req.user.role === 'admin';
-    if (!isSelf && !isAdmin) {
-      return res.status(403).json({ message: 'Forbidden' });
-    }
-
-    const allowedFields = ['name', 'phone', 'profileImage', 'role'];
-    const updates = {};
-    for (const field of allowedFields) {
-      if (req.body[field] !== undefined) updates[field] = req.body[field];
-    }
-
-    // Only allow role change to 'tenant', 'owner', or preserve existing 'admin'
-    if (updates.role && !['tenant', 'owner', 'admin'].includes(updates.role)) {
-      return res.status(400).json({ message: 'Invalid role' });
-    }
-    
-    // Prevent non-admin users from setting admin role
-    if (updates.role === 'admin' && !isAdmin) {
-      return res.status(403).json({ message: 'Cannot set admin role' });
-    }
-
-    const user = await User.findByIdAndUpdate(targetId, updates, { new: true, runValidators: true }).select('-password');
-    if (!user) return res.status(404).json({ message: 'User not found' });
-
-    res.json({ message: 'Profile updated successfully', data: { user } });
-  } catch (error) {
-    console.error('Update user profile error:', error);
-    res.status(500).json({ message: 'Server error while updating profile' });
-  }
-};
 import User from '../models/User.js';
 import Property from '../models/Property.js';
 import Booking from '../models/Booking.js';
 import Review from '../models/Review.js';
 import Notification from '../models/Notification.js';
 import UserRating from '../models/UserRating.js';
+import Otp from '../models/Otp.js';
 import mongoose from 'mongoose';
+import { validatePasswordPolicy } from './authController.js';
+import { sendOtpEmail } from '../config/emailService.js';
+
+function simpleHashOtp(otp) {
+  let h = 0n;
+  for (let i = 0; i < otp.length; i++) h = (h * 31n + BigInt(otp.charCodeAt(i))) % (2n ** 64n);
+  return h.toString(16);
+}
+function generateOtp() {
+  let otp = '';
+  for (let i = 0; i < 6; i++) otp += Math.floor(Math.random() * 10).toString();
+  return otp;
+}
+
+// @desc Initiate email change
+export const changeEmail = async (req, res) => {
+  try {
+    const { password, newEmail } = req.body;
+    if (!password || !newEmail) return res.status(400).json({ message: 'Password and new email are required' });
+    if (!/^\S+@\S+\.\S+$/.test(newEmail)) return res.status(400).json({ message: 'Invalid email format' });
+    const user = await User.findById(req.user._id).select('+password +passwordSalt');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    const valid = await user.comparePassword(password);
+    if (!valid) return res.status(401).json({ message: 'Incorrect password' });
+    const existing = await User.findOne({ email: newEmail.toLowerCase() });
+    if (existing) return res.status(400).json({ message: 'This email is already in use' });
+    const otp = generateOtp();
+    await Otp.deleteMany({ email: newEmail.toLowerCase(), purpose: 'email-change' });
+    await Otp.create({ email: newEmail.toLowerCase(), otp: simpleHashOtp(otp), purpose: 'email-change' });
+    await sendOtpEmail(newEmail, otp, 'email-change');
+    res.json({ message: 'Verification code sent to new email' });
+  } catch (error) {
+    console.error('Change email error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// @desc Confirm email change with OTP
+export const confirmEmailChange = async (req, res) => {
+  try {
+    const { newEmail, otp } = req.body;
+    if (!newEmail || !otp) return res.status(400).json({ message: 'New email and OTP are required' });
+    const record = await Otp.findOne({ email: newEmail.toLowerCase(), purpose: 'email-change' });
+    if (!record || record.otp !== simpleHashOtp(otp)) return res.status(400).json({ message: 'Invalid verification code' });
+    if (record.expiresAt < new Date()) return res.status(400).json({ message: 'Code expired' });
+    const existing = await User.findOne({ email: newEmail.toLowerCase() });
+    if (existing && String(existing._id) !== String(req.user._id)) return res.status(400).json({ message: 'This email is already in use' });
+    const user = await User.findById(req.user._id);
+    user.email = newEmail.toLowerCase();
+    user.isEmailVerified = true;
+    await user.save();
+    await Otp.deleteOne({ _id: record._id });
+    const obj = typeof user.getDecryptedData === 'function' ? user.getDecryptedData() : user.toJSON();
+    res.json({ message: 'Email updated successfully', data: { user: obj } });
+  } catch (error) {
+    console.error('Confirm email change error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// @desc Toggle 2FA
+export const toggle2FA = async (req, res) => {
+  try {
+    const { password, enabled } = req.body;
+    if (!password || enabled === undefined) return res.status(400).json({ message: 'Password and enabled flag are required' });
+    const user = await User.findById(req.user._id).select('+password +passwordSalt');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    const valid = await user.comparePassword(password);
+    if (!valid) return res.status(401).json({ message: 'Incorrect password' });
+    user.twoFactorEnabled = !!enabled;
+    await user.save();
+    res.json({ message: `Two-factor authentication ${enabled ? 'enabled' : 'disabled'}`, twoFactorEnabled: user.twoFactorEnabled });
+  } catch (error) {
+    console.error('Toggle 2FA error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// @desc Change password
+export const changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) return res.status(400).json({ message: 'Current and new passwords are required' });
+    const policyErrors = validatePasswordPolicy(newPassword);
+    if (policyErrors.length > 0) return res.status(400).json({ message: 'Password does not meet requirements', errors: policyErrors });
+    const user = await User.findById(req.user._id).select('+password +passwordSalt');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    const valid = await user.comparePassword(currentPassword);
+    if (!valid) return res.status(401).json({ message: 'Current password is incorrect' });
+    user.password = newPassword;
+    await user.save();
+    res.json({ message: 'Password changed successfully' });
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// @desc Update user profile (self or admin)
+export const updateUserProfile = async (req, res) => {
+  try {
+    const targetId = req.params.id;
+    const isSelf = req.user && (req.user.id === targetId || String(req.user._id) === String(targetId));
+    const isAdmin = req.user && req.user.role === 'admin';
+    if (!isSelf && !isAdmin) return res.status(403).json({ message: 'Forbidden' });
+    const allowedFields = ['name', 'phone', 'profileImage', 'role'];
+    const updates = {};
+    for (const field of allowedFields) {
+      if (req.body[field] !== undefined) updates[field] = req.body[field];
+    }
+    if (updates.role && !['tenant', 'owner', 'admin'].includes(updates.role)) return res.status(400).json({ message: 'Invalid role' });
+    if (updates.role === 'admin' && !isAdmin) return res.status(403).json({ message: 'Cannot set admin role' });
+    const user = await User.findById(targetId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    for (const [field, val] of Object.entries(updates)) user[field] = val;
+    await user.save();
+    const safeUser = typeof user.getDecryptedData === 'function' ? user.getDecryptedData() : user.toJSON();
+    res.json({ message: 'Profile updated successfully', data: { user: safeUser } });
+  } catch (error) {
+    console.error('Update user profile error:', error);
+    res.status(500).json({ message: 'Server error while updating profile' });
+  }
+};
 
 // @desc Get all users (Admin only)
-// @route GET /api/users
-// @access Private (Admin)
 export const getUsers = async (req, res) => {
   try {
-    const { role, page = 1, limit = 20, search } = req.query;
+    const { page = 1, limit = 1000000, role, search } = req.query;
     const query = { isActive: true };
-
     if (role) query.role = role;
-
-    if (search) {
-      query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    const users = await User.find(query)
-      .select('-password')
-      .sort({ createdAt: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
-
-    const total = await User.countDocuments(query);
-
-    // Attach rating summaries (owner/tenant) without altering existing client contract
-    const userIds = users.map(u => u._id);
-    let summaries = [];
-    if (userIds.length) {
-      summaries = await UserRating.aggregate([
-        { $match: { ratee: { $in: userIds } } },
-        { $group: { _id: { ratee: '$ratee', context: '$context' }, avg: { $avg: '$rating' }, count: { $sum: 1 } } }
-      ]);
-    }
-    const map = new Map();
-    for (const s of summaries) {
-      const key = s._id.ratee.toString();
-      const prev = map.get(key) || {};
-      if (s._id.context === 'owner') {
-        prev.avgOwner = s.avg; prev.countOwner = s.count;
-      } else if (s._id.context === 'tenant') {
-        prev.avgTenant = s.avg; prev.countTenant = s.count;
+    if (search) query.$or = [{ name: { $regex: search, $options: 'i' } }, { email: { $regex: search, $options: 'i' } }];
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const [rawUsers, total] = await Promise.all([
+      User.find(query).select('-password -passwordSalt').sort({ createdAt: -1 }).skip(skip).limit(parseInt(limit)),
+      User.countDocuments(query)
+    ]);
+    
+    const users = rawUsers.map(u => {
+      if (typeof u.getDecryptedData === 'function') {
+        return u.getDecryptedData();
       }
-      map.set(key, prev);
-    }
-    const usersWithRatings = users.map(u => {
-      const r = map.get(u._id.toString()) || {};
-      return {
-        ...u.toObject(),
-        avgRatingOwner: r.avgOwner || 0,
-        ratingCountOwner: r.countOwner || 0,
-        avgRatingTenant: r.avgTenant || 0,
-        ratingCountTenant: r.countTenant || 0,
-      };
+      const obj = u.toObject();
+      delete obj.password; delete obj.passwordSalt;
+      return obj;
     });
 
-    res.json({
-      data: {
-        users: usersWithRatings,
-        pagination: {
-          total,
-          page: Number(page),
-          pages: Math.ceil(total / limit),
-          limit: Number(limit)
-        }
-      }
-    });
-
+    res.json({ data: { users, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) } });
   } catch (error) {
     console.error('Get users error:', error);
     res.status(500).json({ message: 'Server error while fetching users' });
   }
 };
 
-// @desc Get current user's favourites with populated details
-// @route GET /api/users/me/favourites
-// @access Private (Tenant)
-export const getMyFavourites = async (req, res) => {
-  try {
-    if (!req.user || req.user.role !== 'tenant') {
-      return res.status(403).json({ message: 'Only tenants can access favourites' });
-    }
-    const user = await User.findById(req.user._id).select('favourites');
-    if (!user) return res.status(404).json({ message: 'User not found' });
-
-    const ownerIds = user.favourites.filter(f => f.itemType === 'owner').map(f => f.itemId);
-    const propertyIds = user.favourites.filter(f => f.itemType === 'property').map(f => f.itemId);
-
-    const [owners, properties] = await Promise.all([
-      ownerIds.length ? User.find({ _id: { $in: ownerIds }, isActive: true }).select('name profileImage role') : [],
-      propertyIds.length ? Property.find({ _id: { $in: propertyIds }, isActive: true }).select('title images price location availabilityStatus bedrooms bathrooms size') : []
-    ]);
-
-    // Map by id for quick lookup
-    const ownersMap = new Map(owners.map(o => [o._id.toString(), o]));
-    const propertiesMap = new Map(properties.map(p => [p._id.toString(), p]));
-
-    const result = user.favourites.map(f => {
-      const id = f.itemId.toString();
-      const details = f.itemType === 'owner' ? ownersMap.get(id) : propertiesMap.get(id);
-      return { ...f.toObject(), details };
-    }).filter(item => !!item.details);
-
-    res.json({ data: { favourites: result } });
-  } catch (error) {
-    console.error('getMyFavourites error:', error);
-    res.status(500).json({ message: 'Server error while fetching favourites' });
-  }
-};
-
-// @desc Add an item to current user's favourites
-// @route POST /api/users/me/favourites
-// @access Private (Tenant)
-export const addFavourite = async (req, res) => {
-  try {
-    if (!req.user || req.user.role !== 'tenant') {
-      return res.status(403).json({ message: 'Only tenants can add favourites' });
-    }
-    const { itemId, itemType } = req.body;
-    if (!itemId || !itemType || !['owner', 'property'].includes(itemType)) {
-      return res.status(400).json({ message: 'itemId and valid itemType are required' });
-    }
-
-    const user = await User.findById(req.user._id).select('favourites');
-    if (!user) return res.status(404).json({ message: 'User not found' });
-
-    const exists = user.favourites.some(f => f.itemType === itemType && String(f.itemId) === String(itemId));
-    if (!exists) {
-      user.favourites.push({ itemId, itemType });
-      await user.save();
-    }
-
-    res.status(201).json({ message: 'Added to favourites', data: { favourites: user.favourites } });
-  } catch (error) {
-    console.error('addFavourite error:', error);
-    res.status(500).json({ message: 'Server error while adding favourite' });
-  }
-};
-
-// @desc Remove an item from current user's favourites
-// @route DELETE /api/users/me/favourites/:itemType/:itemId
-// @access Private (Tenant)
-export const removeFavourite = async (req, res) => {
-  try {
-    if (!req.user || req.user.role !== 'tenant') {
-      return res.status(403).json({ message: 'Only tenants can remove favourites' });
-    }
-    const { itemType, itemId } = req.params;
-    if (!['owner', 'property'].includes(itemType)) {
-      return res.status(400).json({ message: 'Invalid itemType' });
-    }
-    const user = await User.findById(req.user._id).select('favourites');
-    if (!user) return res.status(404).json({ message: 'User not found' });
-
-    const before = user.favourites.length;
-    user.favourites = user.favourites.filter(f => !(f.itemType === itemType && String(f.itemId) === String(itemId)));
-    if (user.favourites.length !== before) {
-      await user.save();
-    }
-
-    res.json({ message: 'Removed from favourites', data: { favourites: user.favourites } });
-  } catch (error) {
-    console.error('removeFavourite error:', error);
-    res.status(500).json({ message: 'Server error while removing favourite' });
-  }
-};
-
-// @desc Delete a user (self or admin). If owner, cascade delete related data
-// @route DELETE /api/users/:id
-// @access Private (Self or Admin)
-export const deleteUser = async (req, res) => {
-  try {
-    const targetId = req.params.id;
-    const isSelf = req.user && (req.user.id === targetId || String(req.user._id) === String(targetId));
-    const isAdmin = req.user && req.user.role === 'admin';
-    if (!isSelf && !isAdmin) {
-      return res.status(403).json({ message: 'Forbidden' });
-    }
-
-    const user = await User.findById(targetId);
-    if (!user) return res.status(404).json({ message: 'User not found' });
-
-    const session = await mongoose.startSession();
-    await session.withTransaction(async () => {
-      // Delete ratings authored by or targeting this user
-      await UserRating.deleteMany({ $or: [{ ratee: user._id }, { rater: user._id }] }).session(session);
-
-      if (user.role === 'owner') {
-        const properties = await Property.find({ owner: user._id }).session(session).select('_id');
-        const propIds = properties.map(p => p._id);
-        if (propIds.length) {
-          await Booking.deleteMany({ property: { $in: propIds } }).session(session);
-          await Review.deleteMany({ property: { $in: propIds } }).session(session);
-          await Notification.deleteMany({ $or: [ { property: { $in: propIds } }, { recipient: user._id } ] }).session(session);
-          await Property.deleteMany({ _id: { $in: propIds } }).session(session);
-        }
-      } else {
-        // Clean notifications addressed to this user
-        await Notification.deleteMany({ recipient: user._id }).session(session);
-      }
-
-      await User.deleteOne({ _id: user._id }).session(session);
-    });
-    session.endSession();
-
-    res.json({ message: 'User and related data deleted successfully', data: { id: targetId } });
-  } catch (error) {
-    console.error('Delete user error:', error);
-    res.status(500).json({ message: 'Server error while deleting user' });
-  }
-};
-
-// @desc Get single user
-// @route GET /api/users/:id
-// @access Public
+// @desc Get a single user
 export const getUser = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id).select('-password');
+    const userDoc = await User.findById(req.params.id).select('-password');
+    if (!userDoc || !userDoc.isActive) return res.status(404).json({ message: 'User not found' });
 
-    if (!user || !user.isActive) {
-      return res.status(404).json({ message: 'User not found' });
-    }
+    // Decrypt PII before sending
+    const user = typeof userDoc.getDecryptedData === 'function'
+      ? userDoc.getDecryptedData()
+      : userDoc.toObject();
 
-    // Get user's properties if they are an owner
     let properties = [];
-    if (user.role === 'owner') {
-      properties = await Property.find({ 
-        owner: user._id, 
-        isActive: true 
-      }).sort({ createdAt: -1 }).limit(6);
+    if (userDoc.role === 'owner') {
+      properties = await Property.find({ owner: userDoc._id, isActive: true }).sort({ createdAt: -1 }).limit(6);
     }
-
-    // Rating summary for profile view
     const groups = await UserRating.aggregate([
-      { $match: { ratee: user._id } },
+      { $match: { ratee: userDoc._id } },
       { $group: { _id: '$context', avg: { $avg: '$rating' }, count: { $sum: 1 } } }
     ]);
     const summary = { owner: { avg: 0, count: 0 }, tenant: { avg: 0, count: 0 } };
@@ -285,26 +183,15 @@ export const getUser = async (req, res) => {
       if (g._id === 'owner') summary.owner = { avg: g.avg || 0, count: g.count || 0 };
       if (g._id === 'tenant') summary.tenant = { avg: g.avg || 0, count: g.count || 0 };
     }
-
-    // Tenant activity: counts for bookings and reviews authored by this user
-    let tenantActivity = undefined;
-    if (user.role === 'tenant') {
+    let tenantActivity;
+    if (userDoc.role === 'tenant') {
       const [bookingsCount, reviewsCount] = await Promise.all([
-        Booking.countDocuments({ tenant: user._id }),
-        Review.countDocuments({ tenant: user._id })
+        Booking.countDocuments({ tenant: userDoc._id }),
+        Review.countDocuments({ tenant: userDoc._id })
       ]);
       tenantActivity = { bookingsCount, reviewsCount };
     }
-
-    res.json({
-      data: {
-        user,
-        properties,
-        ratingSummary: summary,
-        tenantActivity
-      }
-    });
-
+    res.json({ data: { user, properties, ratingSummary: summary, tenantActivity } });
   } catch (error) {
     console.error('Get user error:', error);
     res.status(500).json({ message: 'Server error while fetching user' });
@@ -312,103 +199,124 @@ export const getUser = async (req, res) => {
 };
 
 // @desc Search users
-// @route GET /api/users/search
-// @access Public
 export const searchUsers = async (req, res) => {
   try {
     const { q, role } = req.query;
-
-    if (!q || q.length < 2) {
-      return res.json({ data: { users: [] } });
-    }
-
-    const query = {
-      isActive: true,
-      $or: [
-        { name: { $regex: q, $options: 'i' } },
-        { email: { $regex: q, $options: 'i' } }
-      ]
-    };
-
+    if (!q || q.trim().length < 2) return res.status(400).json({ message: 'Search query must be at least 2 characters' });
+    const query = { isActive: true, $or: [{ name: { $regex: q, $options: 'i' } }, { email: { $regex: q, $options: 'i' } }] };
     if (role) query.role = role;
-
-    const users = await User.find(query)
-      .select('name email role profileImage')
-      .limit(10);
-
+    const users = await User.find(query).select('-password -passwordSalt').limit(20);
     res.json({ data: { users } });
-
   } catch (error) {
     console.error('Search users error:', error);
-    res.status(500).json({ message: 'Server error while searching users' });
-  }
-};
-
-// @desc Check if current user (owner) can view a tenant's contact
-// @route GET /api/users/:id/can-view-contact
-// @access Private
-export const canViewTenantContact = async (req, res) => {
-  try {
-    const targetUserId = req.params.id;
-    const requester = req.user;
-    if (!requester) return res.status(401).json({ message: 'Unauthorized' });
-
-    const tenant = await User.findById(targetUserId).select('_id role');
-    if (!tenant) return res.status(404).json({ message: 'User not found' });
-
-    // Self always allowed
-    if (String(requester._id) === String(targetUserId)) {
-      return res.json({ data: { canView: true } });
-    }
-
-    // Only owners can view tenant contact, and only if tenant completed a booking on owner's property
-    if (tenant.role !== 'tenant' || requester.role !== 'owner') {
-      return res.json({ data: { canView: false } });
-    }
-
-    const match = await Booking.findOne({
-      tenant: tenant._id,
-      status: 'completed',
-    }).populate({ path: 'property', select: 'owner', match: { owner: requester._id } });
-
-    const canView = !!(match && match.property);
-    return res.json({ data: { canView } });
-  } catch (error) {
-    console.error('canViewTenantContact error:', error);
-    res.status(500).json({ message: 'Server error while checking contact visibility' });
+    res.status(500).json({ message: 'Server error during search' });
   }
 };
 
 // @desc Update user status (Admin only)
-// @route PUT /api/users/:id/status
-// @access Private (Admin)
 export const updateUserStatus = async (req, res) => {
   try {
     const { isActive } = req.body;
-    const user = await User.findById(req.params.id);
-
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    user.isActive = isActive;
-    await user.save();
-
-    res.json({
-      message: `User ${isActive ? 'activated' : 'deactivated'} successfully`,
-      data: {
-        user: {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-          isActive: user.isActive
-        }
-      }
-    });
-
+    const user = await User.findByIdAndUpdate(req.params.id, { isActive }, { new: true }).select('-password');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    res.json({ message: `User ${isActive ? 'activated' : 'deactivated'} successfully`, data: { user } });
   } catch (error) {
     console.error('Update user status error:', error);
     res.status(500).json({ message: 'Server error while updating user status' });
+  }
+};
+
+// @desc Delete a user (Admin or self)
+export const deleteUser = async (req, res) => {
+  const targetId = req.params.id;
+  const isSelf = req.user && String(req.user._id) === String(targetId);
+  const isAdmin = req.user && req.user.role === 'admin';
+  if (!isSelf && !isAdmin) return res.status(403).json({ message: 'Forbidden' });
+  const session = await mongoose.startSession();
+  try {
+    await session.withTransaction(async () => {
+      const user = await User.findById(targetId).session(session);
+      if (!user) throw new Error('User not found');
+      let propertyIds = [];
+      if (user.role === 'owner') {
+        const properties = await Property.find({ owner: targetId }, '_id').session(session);
+        propertyIds = properties.map(p => p._id);
+      }
+      await Promise.all([
+        propertyIds.length ? Property.deleteMany({ _id: { $in: propertyIds } }).session(session) : Promise.resolve(),
+        Booking.deleteMany({ $or: [{ tenant: targetId }, { property: { $in: propertyIds } }] }).session(session),
+        Review.deleteMany({ $or: [{ tenant: targetId }, { property: { $in: propertyIds } }] }).session(session),
+        Notification.deleteMany({ user: targetId }).session(session),
+        UserRating.deleteMany({ $or: [{ rater: targetId }, { ratee: targetId }] }).session(session),
+      ]);
+      await User.findByIdAndDelete(targetId).session(session);
+    });
+    res.json({ message: 'User and related data deleted successfully' });
+  } catch (error) {
+    console.error('Delete user error:', error);
+    res.status(500).json({ message: 'Server error during deletion' });
+  } finally {
+    session.endSession();
+  }
+};
+
+// @desc Check if current user can view tenant contact info
+export const canViewTenantContact = async (req, res) => {
+  try {
+    const tenantId = req.params.id;
+    if (!req.user) return res.json({ canView: false });
+    if (req.user.role === 'admin') return res.json({ canView: true });
+    if (req.user.role === 'owner') {
+      const booking = await Booking.findOne({ tenant: tenantId, property: { $in: await Property.find({ owner: req.user._id }).distinct('_id') }, status: { $in: ['confirmed', 'active'] } });
+      return res.json({ canView: !!booking });
+    }
+    res.json({ canView: false });
+  } catch (error) {
+    console.error('Can view contact error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// @desc Get my favourites
+export const getMyFavourites = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select('favourites');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    res.json({ data: { favourites: user.favourites || [] } });
+  } catch (error) {
+    console.error('Get favourites error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// @desc Add to favourites
+export const addFavourite = async (req, res) => {
+  try {
+    const { itemId, itemType } = req.body;
+    if (!itemId || !itemType) return res.status(400).json({ message: 'itemId and itemType are required' });
+    const user = await User.findById(req.user._id);
+    const exists = user.favourites?.some(f => String(f.itemId) === String(itemId) && f.itemType === itemType);
+    if (exists) return res.status(400).json({ message: 'Already in favourites' });
+    user.favourites = user.favourites || [];
+    user.favourites.push({ itemId, itemType });
+    await user.save();
+    res.json({ message: 'Added to favourites', data: { favourites: user.favourites } });
+  } catch (error) {
+    console.error('Add favourite error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// @desc Remove from favourites
+export const removeFavourite = async (req, res) => {
+  try {
+    const { itemId, itemType } = req.params;
+    const user = await User.findById(req.user._id);
+    user.favourites = (user.favourites || []).filter(f => !(String(f.itemId) === String(itemId) && f.itemType === itemType));
+    await user.save();
+    res.json({ message: 'Removed from favourites', data: { favourites: user.favourites } });
+  } catch (error) {
+    console.error('Remove favourite error:', error);
+    res.status(500).json({ message: 'Server error' });
   }
 };

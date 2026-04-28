@@ -14,19 +14,41 @@ export const useAuth = () => {
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [requires2FA, setRequires2FA] = useState(false);
+  const [tempToken, setTempToken] = useState(null);
+  const [passwordExpired, setPasswordExpired] = useState(false);
 
-  // Check if user is authenticated on app load
   useEffect(() => {
     checkAuthStatus();
   }, []);
+
+  // Auto-refresh access token every 13 minutes
+  useEffect(() => {
+    if (!user) return;
+    const interval = setInterval(async () => {
+      try {
+        await authAPI.refreshToken();
+      } catch {
+        // Refresh failed
+      }
+    }, 13 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [user]);
 
   const checkAuthStatus = async () => {
     try {
       const response = await authAPI.getCurrentUser();
       setUser(response.data.user);
+      if (response.data.user?.passwordExpired) {
+        setPasswordExpired(true);
+      }
     } catch (error) {
-      // User is not authenticated, which is fine
-      setUser(null);
+      try {
+        const refreshRes = await authAPI.refreshToken();
+        setUser(refreshRes.data.user);
+      } catch {
+        setUser(null);
+      }
     } finally {
       setLoading(false);
     }
@@ -35,7 +57,30 @@ export const AuthProvider = ({ children }) => {
   const login = async (email, password) => {
     try {
       const response = await authAPI.login(email, password);
+      if (response.requires2FA) {
+        setRequires2FA(true);
+        setTempToken(response.tempToken);
+        return { requires2FA: true };
+      }
       setUser(response.data.user);
+      if (response.passwordExpired) {
+        setPasswordExpired(true);
+      }
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  };
+
+  const complete2FA = async (otp) => {
+    try {
+      const response = await authAPI.verify2FA(tempToken, otp);
+      setUser(response.data.user);
+      setRequires2FA(false);
+      setTempToken(null);
+      if (response.passwordExpired) {
+        setPasswordExpired(true);
+      }
       return response.data;
     } catch (error) {
       throw error;
@@ -56,8 +101,10 @@ export const AuthProvider = ({ children }) => {
     try {
       await authAPI.logout();
       setUser(null);
+      setRequires2FA(false);
+      setTempToken(null);
+      setPasswordExpired(false);
     } catch (error) {
-      // Even if logout fails on server, clear local state
       setUser(null);
     }
   };
@@ -74,14 +121,21 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const clearPasswordExpired = () => setPasswordExpired(false);
+
   const value = {
     user,
+    setUser,
     loading,
     login,
     register,
     logout,
     updateProfile,
-    checkAuthStatus
+    checkAuthStatus,
+    requires2FA,
+    complete2FA,
+    passwordExpired,
+    clearPasswordExpired,
   };
 
   return (

@@ -11,7 +11,11 @@ import {
   getMyFavourites,
   addFavourite,
   removeFavourite,
-  updateUserProfile
+  updateUserProfile,
+  changeEmail,
+  confirmEmailChange,
+  toggle2FA,
+  changePassword,
 } from '../controllers/userController.js';
 import { authenticateToken, authorize } from '../middleware/auth.js';
 
@@ -22,11 +26,16 @@ const statusUpdateValidation = [
   body('isActive').isBoolean().withMessage('isActive must be a boolean')
 ];
 
+// Security endpoints (must be above /:id to avoid shadowing)
+router.post('/change-email', authenticateToken, changeEmail);
+router.post('/confirm-email-change', authenticateToken, confirmEmailChange);
+router.post('/toggle-2fa', authenticateToken, toggle2FA);
+router.post('/change-password', authenticateToken, changePassword);
+
 // Update user profile (self or admin)
 router.put('/:id', authenticateToken, updateUserProfile);
 
 // Routes
-// Public user listing to support Owners/Tenants directory pages
 router.get('/', getUsers);
 router.get('/search', searchUsers);
 // Favourites (tenant)
@@ -44,7 +53,7 @@ router.put('/:id/status',
   updateUserStatus
 );
 
-// Delete user (self or admin). If owner, cascade deletes related data
+// Delete user (self or admin)
 router.delete('/:id', authenticateToken, deleteUser);
 
 export default router;

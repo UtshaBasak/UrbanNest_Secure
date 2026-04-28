@@ -6,7 +6,13 @@ import {
   logout,
   getCurrentUser,
   updateCurrentUser,
-  deleteCurrentUser
+  deleteCurrentUser,
+  sendOtp,
+  verifyOtp,
+  verify2FA,
+  refreshAccessToken,
+  forgotPassword,
+  resetPassword,
 } from '../controllers/authController.js';
 import { authenticateToken } from '../middleware/auth.js';
 
@@ -16,41 +22,38 @@ const router = express.Router();
 const registerValidation = [
   body('name').trim().isLength({ min: 2 }).withMessage('Name must be at least 2 characters'),
   body('email')
-    .isEmail()
-    .normalizeEmail({
-      gmail_remove_dots: false,
-      gmail_remove_subaddress: false,
-      gmail_convert_googlemaildotcom: false,
-    })
-    .withMessage('Please enter a valid email'),
-  body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
-  body('phone').isMobilePhone().withMessage('Please enter a valid phone number'),
-  body('role').optional().isIn(['admin', 'owner', 'tenant']).withMessage('Invalid role')
+    .isEmail().withMessage('Please enter a valid email')
+    .customSanitizer(v => v.toLowerCase().trim()),
+  body('password').isLength({ min: 12 }).withMessage('Password must be at least 12 characters'),
+  body('phone').notEmpty().withMessage('Phone number is required'),
+  body('role').optional().isIn(['admin', 'owner', 'tenant']).withMessage('Invalid role'),
 ];
 
 const loginValidation = [
   body('email')
-    .isEmail()
-    .normalizeEmail({
-      gmail_remove_dots: false,
-      gmail_remove_subaddress: false,
-      gmail_convert_googlemaildotcom: false,
-    })
-    .withMessage('Please enter a valid email'),
-  body('password').notEmpty().withMessage('Password is required')
+    .isEmail().withMessage('Please enter a valid email')
+    .customSanitizer(v => v.toLowerCase().trim()),
+  body('password').notEmpty().withMessage('Password is required'),
 ];
 
 const updateProfileValidation = [
   body('name').optional().trim().isLength({ min: 2 }).withMessage('Name must be at least 2 characters'),
-  body('phone').optional().isMobilePhone().withMessage('Please enter a valid phone number'),
-  // Accept any non-empty string to allow base64 data URLs or hosted URLs
-  body('profileImage').optional().isString().withMessage('Profile image must be a string')
+  body('phone').optional().notEmpty().withMessage('Phone number is required'),
+  body('profileImage').optional().isString().withMessage('Profile image must be a string'),
 ];
 
-// Routes
+// Public routes
+router.post('/send-otp', sendOtp);
+router.post('/verify-otp', verifyOtp);
 router.post('/register', registerValidation, register);
 router.post('/login', loginValidation, login);
+router.post('/verify-2fa', verify2FA);
+router.post('/refresh', refreshAccessToken);
+router.post('/forgot-password', forgotPassword);
+router.post('/reset-password', resetPassword);
 router.post('/logout', logout);
+
+// Protected routes
 router.get('/me', authenticateToken, getCurrentUser);
 router.put('/me', authenticateToken, updateProfileValidation, updateCurrentUser);
 router.delete('/me', authenticateToken, deleteCurrentUser);

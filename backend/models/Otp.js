@@ -1,0 +1,34 @@
+import mongoose from 'mongoose';
+
+const otpSchema = new mongoose.Schema({
+  email: {
+    type: String,
+    required: true,
+    lowercase: true,
+  },
+  otp: {
+    type: String,
+    required: true,
+  },
+  purpose: {
+    type: String,
+    required: true,
+    enum: ['signup', 'forgot-password', 'email-change', '2fa-login'],
+  },
+  expiresAt: {
+    type: Date,
+    required: true,
+    default: () => new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now,
+  },
+});
+
+// TTL index: MongoDB will auto-delete documents after expiresAt
+otpSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+// Index for fast lookups
+otpSchema.index({ email: 1, purpose: 1 });
+
+export default mongoose.model('Otp', otpSchema);
