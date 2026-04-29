@@ -116,14 +116,16 @@ export const sendOtp = async (req, res) => {
     if (!validPurposes.includes(purpose)) return res.status(400).json({ message: 'Invalid purpose' });
 
     // Rate limit: max 1 OTP per email+purpose per 60s
-    const recent = await Otp.findOne({ email: email.toLowerCase(), purpose, createdAt: { $gt: new Date(Date.now() - 60000) } });
+    const pubKey = getPublicKey('user-data');
+    const fpRecent = fingerprint(email.toLowerCase(), pubKey);
+    const recent = await Otp.findOne({ emailFingerprint: fpRecent, purpose, createdAt: { $gt: new Date(Date.now() - 60000) } });
     if (recent) return res.status(429).json({ message: 'Please wait before requesting another code' });
 
     // Delete old OTPs for this email+purpose
-    await Otp.deleteMany({ email: email.toLowerCase(), purpose });
+    await Otp.deleteMany({ emailFingerprint: fpRecent, purpose });
 
     const otp = generateOtp();
-    await Otp.create({ email: email.toLowerCase(), otp: simpleHashOtp(otp), purpose });
+    await Otp.create({ emailFingerprint: fpRecent, otp: simpleHashOtp(otp), purpose });
     await sendOtpEmail(email, otp, purpose);
 
     res.json({ message: 'Verification code sent to your email' });
@@ -139,7 +141,9 @@ export const verifyOtp = async (req, res) => {
     const { email, otp, purpose } = req.body;
     if (!email || !otp || !purpose) return res.status(400).json({ message: 'Email, OTP, and purpose are required' });
 
-    const record = await Otp.findOne({ email: email.toLowerCase(), purpose });
+    const pubKeyVerify = getPublicKey('user-data');
+    const fpVerify = fingerprint(email.toLowerCase(), pubKeyVerify);
+    const record = await Otp.findOne({ emailFingerprint: fpVerify, purpose });
     if (!record) return res.status(400).json({ message: 'No verification code found. Please request a new one.' });
     if (record.expiresAt < new Date()) {
       await Otp.deleteOne({ _id: record._id });
@@ -158,16 +162,12 @@ export const verifyOtp = async (req, res) => {
   }
 };
 
-// Helper: look up user by email using fingerprint (RSA-safe)
+// Helper: look up user by email using fingerprint (RSA-safe).
+// Plaintext email is NEVER stored in the DB, so fingerprint is the only lookup path.
 async function findUserByEmail(email) {
-  try {
-    const pubKey = getPublicKey('user-data');
-    const fp = fingerprint(email.toLowerCase(), pubKey);
-    return await User.findOne({ emailFingerprint: fp });
-  } catch {
-    // Fallback to plaintext lookup if keys not ready
-    return await User.findOne({ email: email.toLowerCase() });
-  }
+  const pubKey = getPublicKey('user-data'); // throws if keys not ready
+  const fp = fingerprint(email.toLowerCase(), pubKey);
+  return await User.findOne({ emailFingerprint: fp });
 }
 
 // ─── Register ────────────────────────────────────────────────────────────────
@@ -222,15 +222,11 @@ export const login = async (req, res) => {
     if (!errors.isEmpty()) return res.status(400).json({ message: 'Validation failed', errors: errors.array() });
 
     const { email, password } = req.body;
-    // Use fingerprint lookup to find RSA-encrypted user records
+    // Plaintext email is never in the DB — always use fingerprint lookup
     let user;
-    try {
-      const pubKey = getPublicKey('user-data');
-      const fp = fingerprint(email.toLowerCase(), pubKey);
-      user = await User.findOne({ emailFingerprint: fp }).select('+password +passwordSalt +failedLoginAttempts +lockUntil +twoFactorEnabled +isEmailVerified +passwordChangedAt');
-    } catch {
-      user = await User.findOne({ email: email.toLowerCase() }).select('+password +passwordSalt +failedLoginAttempts +lockUntil +twoFactorEnabled +isEmailVerified +passwordChangedAt');
-    }
+    const pubKey = getPublicKey('user-data');
+    const fp = fingerprint(email.toLowerCase(), pubKey);
+    user = await User.findOne({ emailFingerprint: fp }).select('+password +passwordSalt +failedLoginAttempts +lockUntil +twoFactorEnabled +isEmailVerified +passwordChangedAt');
     if (!user || !user.isActive) return res.status(401).json({ message: 'Invalid credentials' });
 
     // Account lockout check
@@ -259,8 +255,10 @@ export const login = async (req, res) => {
     if (user.twoFactorEnabled) {
       // Send OTP and return requires2FA
       const otp = generateOtp();
-      await Otp.deleteMany({ email: email.toLowerCase(), purpose: '2fa-login' });
-      await Otp.create({ email: email.toLowerCase(), otp: simpleHashOtp(otp), purpose: '2fa-login' });
+        const pubKey2fa = getPublicKey('user-data');
+        const fp2fa = fingerprint(email.toLowerCase(), pubKey2fa);
+        await Otp.deleteMany({ emailFingerprint: fp2fa, purpose: '2fa-login' });
+        await Otp.create({ emailFingerprint: fp2fa, otp: simpleHashOtp(otp), purpose: '2fa-login' });
       await sendOtpEmail(email, otp, '2fa-login');
 
       const tempToken = jwt.sign({ userId: user._id, purpose: '2fa-pending' }, process.env.JWT_SECRET, { expiresIn: '10m' });
@@ -297,7 +295,12 @@ export const verify2FA = async (req, res) => {
     const user = await User.findById(decoded.userId);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
-    const record = await Otp.findOne({ email: user.email.toLowerCase(), purpose: '2fa-login' });
+    // email is not in plaintext in DB — decrypt it to locate the OTP record
+    const decryptedUser = user.getDecryptedData();
+    if (!decryptedUser.email) return res.status(500).json({ message: 'Unable to resolve user email' });
+    const pubKey2faLookup = getPublicKey('user-data');
+    const fp2faLookup = fingerprint(decryptedUser.email.toLowerCase(), pubKey2faLookup);
+    const record = await Otp.findOne({ emailFingerprint: fp2faLookup, purpose: '2fa-login' });
     if (!record || record.otp !== simpleHashOtp(otp)) return res.status(400).json({ message: 'Invalid verification code' });
     if (record.expiresAt < new Date()) return res.status(400).json({ message: 'Code expired' });
 
@@ -366,8 +369,10 @@ export const forgotPassword = async (req, res) => {
     if (!user) return res.json({ message: 'If an account exists with this email, a verification code has been sent.' });
 
     const otp = generateOtp();
-    await Otp.deleteMany({ email: email.toLowerCase(), purpose: 'forgot-password' });
-    await Otp.create({ email: email.toLowerCase(), otp: simpleHashOtp(otp), purpose: 'forgot-password' });
+    const pubKeyForgot = getPublicKey('user-data');
+    const fpForgot = fingerprint(email.toLowerCase(), pubKeyForgot);
+    await Otp.deleteMany({ emailFingerprint: fpForgot, purpose: 'forgot-password' });
+    await Otp.create({ emailFingerprint: fpForgot, otp: simpleHashOtp(otp), purpose: 'forgot-password' });
     await sendOtpEmail(email, otp, 'forgot-password');
 
     res.json({ message: 'If an account exists with this email, a verification code has been sent.' });
@@ -386,20 +391,16 @@ export const resetPassword = async (req, res) => {
     const policyErrors = validatePasswordPolicy(newPassword);
     if (policyErrors.length > 0) return res.status(400).json({ message: 'Password does not meet requirements', errors: policyErrors });
 
-    const record = await Otp.findOne({ email: email.toLowerCase(), purpose: 'forgot-password' });
+    const pubKeyForgotVerify = getPublicKey('user-data');
+    const fpForgotVerify = fingerprint(email.toLowerCase(), pubKeyForgotVerify);
+    const record = await Otp.findOne({ emailFingerprint: fpForgotVerify, purpose: 'forgot-password' });
     if (!record || record.otp !== simpleHashOtp(otp)) return res.status(400).json({ message: 'Invalid or expired verification code' });
     if (record.expiresAt < new Date()) return res.status(400).json({ message: 'Code expired' });
 
-    // Use fingerprint-based lookup for RSA-encrypted email fields
-    const user = await (async () => {
-      try {
-        const pubKey = getPublicKey('user-data');
-        const fp = fingerprint(email.toLowerCase(), pubKey);
-        return await User.findOne({ emailFingerprint: fp }).select('+password +passwordSalt');
-      } catch {
-        return await User.findOne({ email: email.toLowerCase() }).select('+password +passwordSalt');
-      }
-    })();
+    // Plaintext email never stored — use fingerprint lookup only
+    const pubKeyReset = getPublicKey('user-data');
+    const fpReset = fingerprint(email.toLowerCase(), pubKeyReset);
+    const user = await User.findOne({ emailFingerprint: fpReset }).select('+password +passwordSalt');
     if (!user) return res.status(404).json({ message: 'User not found' });
 
     user.password = newPassword;

@@ -11,61 +11,58 @@ export const getOwners = async (req, res) => {
     const { page = 1, limit = 20, search } = req.query;
     const query = { role: 'owner', isActive: true };
 
+    // Fetch all owners, decrypt, then filter in-memory
+    // (plaintext PII not stored in DB; regex search on encrypted blobs is not possible)
+    let rawOwners = await User.find(query)
+      .sort({ createdAt: -1 });
+
+    let decryptedOwners = rawOwners.map(o =>
+      typeof o.getDecryptedData === 'function' ? o.getDecryptedData() : o.toJSON()
+    );
+
     if (search) {
-      query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { phone: { $regex: search, $options: 'i' } }
-      ];
+      const s = search.toLowerCase();
+      decryptedOwners = decryptedOwners.filter(o =>
+        (o.name  && o.name.toLowerCase().includes(s)) ||
+        (o.email && o.email.toLowerCase().includes(s)) ||
+        (o.phone && o.phone.toLowerCase().includes(s))
+      );
     }
 
-    const owners = await User.find(query)
-      .select('-password')
-      .sort({ createdAt: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
-
-    const total = await User.countDocuments(query);
+    const total = decryptedOwners.length;
+    const pageNum = Number(page);
+    const limitNum = Number(limit);
+    const paged = decryptedOwners.slice((pageNum - 1) * limitNum, pageNum * limitNum);
+    const ownerIds = paged.map(o => o._id);
 
     // Get rating summaries for owners
-    const ownerIds = owners.map(o => o._id);
     let ratings = [];
     if (ownerIds.length) {
       ratings = await UserRating.aggregate([
-        { $match: { ratee: { $in: ownerIds }, context: 'owner' } },
+        { $match: { ratee: { $in: ownerIds.map(id => new mongoose.Types.ObjectId(String(id))) }, context: 'owner' } },
         { $group: { _id: '$ratee', avgRating: { $avg: '$rating' }, ratingCount: { $sum: 1 } } }
       ]);
     }
-
     const ratingsMap = new Map(ratings.map(r => [r._id.toString(), r]));
-    
+
     // Get property counts for each owner
     const propertyCounts = await Property.aggregate([
-      { $match: { owner: { $in: ownerIds }, isActive: true } },
+      { $match: { owner: { $in: ownerIds.map(id => new mongoose.Types.ObjectId(String(id))) }, isActive: true } },
       { $group: { _id: '$owner', propertyCount: { $sum: 1 } } }
     ]);
-    
     const propertyCountsMap = new Map(propertyCounts.map(p => [p._id.toString(), p.propertyCount]));
 
-    const ownersWithDetails = owners.map(owner => {
-      const rating = ratingsMap.get(owner._id.toString()) || {};
-      return {
-        ...owner.toObject(),
-        avgRating: rating.avgRating || 0,
-        ratingCount: rating.ratingCount || 0,
-        propertyCount: propertyCountsMap.get(owner._id.toString()) || 0
-      };
-    });
+    const ownersWithDetails = paged.map(owner => ({
+      ...owner,
+      avgRating:     ratingsMap.get(String(owner._id))?.avgRating     || 0,
+      ratingCount:   ratingsMap.get(String(owner._id))?.ratingCount   || 0,
+      propertyCount: propertyCountsMap.get(String(owner._id))         || 0,
+    }));
 
     res.json({
       data: {
         owners: ownersWithDetails,
-        pagination: {
-          total,
-          page: Number(page),
-          pages: Math.ceil(total / limit),
-          limit: Number(limit)
-        }
+        pagination: { total, page: pageNum, pages: Math.ceil(total / limitNum), limit: limitNum }
       }
     });
 
@@ -83,52 +80,48 @@ export const getTenants = async (req, res) => {
     const { page = 1, limit = 20, search } = req.query;
     const query = { role: 'tenant', isActive: true };
 
+    // Fetch all tenants, decrypt, filter in-memory
+    let rawTenants = await User.find(query).sort({ createdAt: -1 });
+
+    let decryptedTenants = rawTenants.map(t =>
+      typeof t.getDecryptedData === 'function' ? t.getDecryptedData() : t.toJSON()
+    );
+
     if (search) {
-      query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { phone: { $regex: search, $options: 'i' } }
-      ];
+      const s = search.toLowerCase();
+      decryptedTenants = decryptedTenants.filter(t =>
+        (t.name  && t.name.toLowerCase().includes(s)) ||
+        (t.email && t.email.toLowerCase().includes(s)) ||
+        (t.phone && t.phone.toLowerCase().includes(s))
+      );
     }
 
-    const tenants = await User.find(query)
-      .select('-password')
-      .sort({ createdAt: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
-
-    const total = await User.countDocuments(query);
+    const total = decryptedTenants.length;
+    const pageNum = Number(page);
+    const limitNum = Number(limit);
+    const paged = decryptedTenants.slice((pageNum - 1) * limitNum, pageNum * limitNum);
+    const tenantIds = paged.map(t => t._id);
 
     // Get rating summaries for tenants
-    const tenantIds = tenants.map(t => t._id);
     let ratings = [];
     if (tenantIds.length) {
       ratings = await UserRating.aggregate([
-        { $match: { ratee: { $in: tenantIds }, context: 'tenant' } },
+        { $match: { ratee: { $in: tenantIds.map(id => new mongoose.Types.ObjectId(String(id))) }, context: 'tenant' } },
         { $group: { _id: '$ratee', avgRating: { $avg: '$rating' }, ratingCount: { $sum: 1 } } }
       ]);
     }
-
     const ratingsMap = new Map(ratings.map(r => [r._id.toString(), r]));
 
-    const tenantsWithDetails = tenants.map(tenant => {
-      const rating = ratingsMap.get(tenant._id.toString()) || {};
-      return {
-        ...tenant.toObject(),
-        avgRating: rating.avgRating || 0,
-        ratingCount: rating.ratingCount || 0
-      };
-    });
+    const tenantsWithDetails = paged.map(tenant => ({
+      ...tenant,
+      avgRating:   ratingsMap.get(String(tenant._id))?.avgRating   || 0,
+      ratingCount: ratingsMap.get(String(tenant._id))?.ratingCount || 0,
+    }));
 
     res.json({
       data: {
         tenants: tenantsWithDetails,
-        pagination: {
-          total,
-          page: Number(page),
-          pages: Math.ceil(total / limit),
-          limit: Number(limit)
-        }
+        pagination: { total, page: pageNum, pages: Math.ceil(total / limitNum), limit: limitNum }
       }
     });
 

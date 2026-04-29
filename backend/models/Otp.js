@@ -1,10 +1,11 @@
 import mongoose from 'mongoose';
 
 const otpSchema = new mongoose.Schema({
-  email: {
+  // Store deterministic fingerprint of email instead of plaintext
+  emailFingerprint: {
     type: String,
     required: true,
-    lowercase: true,
+    index: true,
   },
   otp: {
     type: String,
@@ -28,7 +29,7 @@ const otpSchema = new mongoose.Schema({
 
 // TTL index: MongoDB will auto-delete documents after expiresAt
 otpSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
-// Index for fast lookups
-otpSchema.index({ email: 1, purpose: 1 });
+// Index for fast lookups (fingerprint + purpose)
+otpSchema.index({ emailFingerprint: 1, purpose: 1 });
 
 export default mongoose.model('Otp', otpSchema);

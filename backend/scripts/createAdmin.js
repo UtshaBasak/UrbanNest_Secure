@@ -2,6 +2,8 @@ import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
 import User from '../models/User.js';
+import { fingerprint } from '../crypto/rsa.js';
+import { getPublicKey } from '../crypto/keyManager.js';
 
 dotenv.config();
 
@@ -12,10 +14,14 @@ const createAdminUser = async () => {
     console.log('Connected to MongoDB');
 
     // Check if admin user already exists
-    const existingAdmin = await User.findOne({ email: 'admin@gmail.com' });
+    // Lookup by fingerprint to avoid relying on plaintext email storage
+    const pubKey = getPublicKey('user-data');
+    const fpAdmin = fingerprint('admin@gmail.com', pubKey);
+    const existingAdmin = await User.findOne({ emailFingerprint: fpAdmin });
     
     if (existingAdmin) {
-      console.log('Admin user already exists:', existingAdmin.email);
+      const adminObj = typeof existingAdmin.getDecryptedData === 'function' ? existingAdmin.getDecryptedData() : existingAdmin.toJSON();
+      console.log('Admin user already exists:', adminObj.email);
       if (existingAdmin.role !== 'admin') {
         existingAdmin.role = 'admin';
         await existingAdmin.save();
@@ -33,7 +39,8 @@ const createAdminUser = async () => {
       });
 
       await adminUser.save();
-      console.log('Admin user created successfully:', adminUser.email);
+      const createdObj = typeof adminUser.getDecryptedData === 'function' ? adminUser.getDecryptedData() : adminUser.toJSON();
+      console.log('Admin user created successfully:', createdObj.email);
     }
 
     console.log('Admin setup completed');

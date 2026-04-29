@@ -4,22 +4,35 @@ import { encrypt, decrypt, fingerprint } from '../crypto/rsa.js';
 import { getPublicKey, getPrivateKey } from '../crypto/keyManager.js';
 
 const userSchema = new mongoose.Schema({
+  // ── Plaintext PII fields ──────────────────────────────────────────────────
+  // These are NEVER returned in DB queries (select:false) and are immediately
+  // $unset from MongoDB by the post('save') hook. They exist in Mongoose only
+  // long enough for the pre('save') encryption hook to run.
   name: {
     type: String,
-    required: [true, 'Name is required'],
     trim: true,
-    minlength: [2, 'Name must be at least 2 characters long']
+    minlength: [2, 'Name must be at least 2 characters long'],
+    select: false   // never returned from DB queries
   },
-  nameEncrypted: { type: String, default: '' },
   email: {
     type: String,
-    required: [true, 'Email is required'],
-    unique: true,
     lowercase: true,
-    match: [/^\S+@\S+\.\S+$/, 'Please enter a valid email']
+    match: [/^\S+@\S+\.\S+$/, 'Please enter a valid email'],
+    select: false   // never returned from DB queries; lookup via emailFingerprint
   },
-  emailEncrypted: { type: String, default: '' },
-  emailFingerprint: { type: String, default: '', index: true },
+  phone: {
+    type: String,
+    select: false   // never returned from DB queries
+  },
+
+  // ── Encrypted PII fields (the only PII persisted in MongoDB) ─────────────
+  nameEncrypted:     { type: String, default: '' },
+  emailEncrypted:    { type: String, default: '' },
+  // emailFingerprint is a deterministic RSA token used for safe equality-lookup
+  emailFingerprint:  { type: String, default: '', index: true, unique: true, sparse: true },
+  phoneEncrypted:    { type: String, default: '' },
+
+  // ── Auth fields ───────────────────────────────────────────────────────────
   password: {
     type: String,
     required: [true, 'Password is required'],
@@ -27,18 +40,8 @@ const userSchema = new mongoose.Schema({
     select: false
   },
   passwordSalt: { type: String, default: '', select: false },
-  phone: {
-    type: String,
-    required: [true, 'Phone number is required'],
-    validate: {
-      validator: function(v) {
-        // At least 5 digits total, allows +, spaces, -, (, )
-        return v && /\d{5,}/.test(v.replace(/[\s\-().+]/g, ''));
-      },
-      message: 'Please enter a valid phone number (at least 5 digits)'
-    }
-  },
-  phoneEncrypted: { type: String, default: '' },
+
+  // ── Profile & role ────────────────────────────────────────────────────────
   role: {
     type: String,
     enum: ['admin', 'owner', 'tenant'],
@@ -47,23 +50,23 @@ const userSchema = new mongoose.Schema({
   profileImage: { type: String, default: '' },
   favourites: [
     {
-      itemId: { type: mongoose.Schema.Types.ObjectId, required: true },
+      itemId:   { type: mongoose.Schema.Types.ObjectId, required: true },
       itemType: { type: String, enum: ['owner', 'property'], required: true },
-      addedAt: { type: Date, default: Date.now }
+      addedAt:  { type: Date, default: Date.now }
     }
   ],
-  isActive: { type: Boolean, default: true },
-  isEmailVerified: { type: Boolean, default: false },
-  twoFactorEnabled: { type: Boolean, default: false },
-  passwordChangedAt: { type: Date, default: null },
+
+  // ── Status flags ──────────────────────────────────────────────────────────
+  isActive:          { type: Boolean, default: true },
+  isEmailVerified:   { type: Boolean, default: false },
+  twoFactorEnabled:  { type: Boolean, default: false },
+  passwordChangedAt: { type: Date,    default: null },
   failedLoginAttempts: { type: Number, default: 0, select: false },
-  lockUntil: { type: Date, default: null, select: false },
-  isEncrypted: { type: Boolean, default: false },
+  lockUntil:         { type: Date,    default: null, select: false },
+  isEncrypted:       { type: Boolean, default: false },
 }, { timestamps: true });
 
-// ─── Mongoose 8: async pre-save hooks must NOT call next() ────────────────────
-
-// 1. Password hashing
+// ─── Pre-save: Password hashing ───────────────────────────────────────────────
 userSchema.pre('save', async function () {
   if (!this.isModified('password')) return;
   const userSalt = bcrypt.genSaltSync(4);
@@ -74,7 +77,7 @@ userSchema.pre('save', async function () {
   this.passwordChangedAt = new Date();
 });
 
-// 2. RSA encryption of PII
+// ─── Pre-save: RSA encryption of PII ─────────────────────────────────────────
 userSchema.pre('save', async function () {
   const piiChanged = this.isModified('name') || this.isModified('email') || this.isModified('phone');
   if (!piiChanged) return;
@@ -83,7 +86,6 @@ userSchema.pre('save', async function () {
   try {
     pubKey = getPublicKey('user-data');
   } catch {
-    // Keys not ready — save plaintext, encrypt on next update
     console.warn('[User] RSA keys not ready — saving without PII encryption');
     return;
   }
@@ -101,8 +103,21 @@ userSchema.pre('save', async function () {
     }
     this.isEncrypted = true;
   } catch (err) {
-    // Never block save due to encryption failure — log and continue
     console.error('[User] RSA encryption error during save:', err.message);
+  }
+});
+
+// ─── Post-save: Wipe plaintext PII from MongoDB immediately ──────────────────
+// After every save the plaintext name/email/phone are removed from the
+// database document so that only the encrypted ciphertext remains on disk.
+userSchema.post('save', async function () {
+  try {
+    await this.constructor.collection.updateOne(
+      { _id: this._id },
+      { $unset: { name: '', email: '', phone: '' } }
+    );
+  } catch (err) {
+    console.error('[User] Failed to wipe plaintext PII after save:', err.message);
   }
 });
 
@@ -144,17 +159,23 @@ userSchema.methods.isPasswordExpired = function () {
   return (Date.now() - this.passwordChangedAt.getTime()) > 90 * 24 * 60 * 60 * 1000;
 };
 
+/**
+ * Decrypt PII from the encrypted fields and return a sanitised plain object.
+ * Sensitive auth fields and raw encrypted blobs are stripped from the result.
+ */
 userSchema.methods.getDecryptedData = function () {
   const obj = this.toObject();
-  if (!this.isEncrypted) return obj;
-  try {
-    const privKey = getPrivateKey('user-data');
-    if (this.nameEncrypted) obj.name = decrypt(this.nameEncrypted, privKey);
-    if (this.emailEncrypted) obj.email = decrypt(this.emailEncrypted, privKey);
-    if (this.phoneEncrypted) obj.phone = decrypt(this.phoneEncrypted, privKey);
-  } catch (e) {
-    console.error('[User] Decryption error:', e.message);
+  if (this.isEncrypted) {
+    try {
+      const privKey = getPrivateKey('user-data');
+      if (this.nameEncrypted)  obj.name  = decrypt(this.nameEncrypted,  privKey);
+      if (this.emailEncrypted) obj.email = decrypt(this.emailEncrypted, privKey);
+      if (this.phoneEncrypted) obj.phone = decrypt(this.phoneEncrypted, privKey);
+    } catch (e) {
+      console.error('[User] Decryption error:', e.message);
+    }
   }
+  // Strip fields that must never leave the server
   delete obj.password;
   delete obj.passwordSalt;
   delete obj.nameEncrypted;
@@ -166,15 +187,12 @@ userSchema.methods.getDecryptedData = function () {
   return obj;
 };
 
+/**
+ * toJSON — automatically decrypts PII so that every JSON response (including
+ * nested populate results) returns readable name / email / phone.
+ */
 userSchema.methods.toJSON = function () {
-  const obj = this.toObject();
-  delete obj.password;
-  delete obj.passwordSalt;
-  delete obj.nameEncrypted;
-  delete obj.emailEncrypted;
-  delete obj.emailFingerprint;
-  delete obj.phoneEncrypted;
-  return obj;
+  return this.getDecryptedData();
 };
 
 export default mongoose.model('User', userSchema);

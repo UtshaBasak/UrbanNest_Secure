@@ -8,6 +8,8 @@ import Otp from '../models/Otp.js';
 import mongoose from 'mongoose';
 import { validatePasswordPolicy } from './authController.js';
 import { sendOtpEmail } from '../config/emailService.js';
+import { fingerprint } from '../crypto/rsa.js';
+import { getPublicKey } from '../crypto/keyManager.js';
 
 function simpleHashOtp(otp) {
   let h = 0n;
@@ -30,11 +32,18 @@ export const changeEmail = async (req, res) => {
     if (!user) return res.status(404).json({ message: 'User not found' });
     const valid = await user.comparePassword(password);
     if (!valid) return res.status(401).json({ message: 'Incorrect password' });
-    const existing = await User.findOne({ email: newEmail.toLowerCase() });
+
+    // Use fingerprint lookup — plaintext email not stored in DB
+    const pubKey = getPublicKey('user-data');
+    const fp = fingerprint(newEmail.toLowerCase(), pubKey);
+    const existing = await User.findOne({ emailFingerprint: fp });
     if (existing) return res.status(400).json({ message: 'This email is already in use' });
+
     const otp = generateOtp();
-    await Otp.deleteMany({ email: newEmail.toLowerCase(), purpose: 'email-change' });
-    await Otp.create({ email: newEmail.toLowerCase(), otp: simpleHashOtp(otp), purpose: 'email-change' });
+    const pubKeyEmailChange = getPublicKey('user-data');
+    const fpEmailChange = fingerprint(newEmail.toLowerCase(), pubKeyEmailChange);
+    await Otp.deleteMany({ emailFingerprint: fpEmailChange, purpose: 'email-change' });
+    await Otp.create({ emailFingerprint: fpEmailChange, otp: simpleHashOtp(otp), purpose: 'email-change' });
     await sendOtpEmail(newEmail, otp, 'email-change');
     res.json({ message: 'Verification code sent to new email' });
   } catch (error) {
@@ -48,11 +57,18 @@ export const confirmEmailChange = async (req, res) => {
   try {
     const { newEmail, otp } = req.body;
     if (!newEmail || !otp) return res.status(400).json({ message: 'New email and OTP are required' });
-    const record = await Otp.findOne({ email: newEmail.toLowerCase(), purpose: 'email-change' });
+    const pubKeyEmailChangeVerify = getPublicKey('user-data');
+    const fpEmailChangeVerify = fingerprint(newEmail.toLowerCase(), pubKeyEmailChangeVerify);
+    const record = await Otp.findOne({ emailFingerprint: fpEmailChangeVerify, purpose: 'email-change' });
     if (!record || record.otp !== simpleHashOtp(otp)) return res.status(400).json({ message: 'Invalid verification code' });
     if (record.expiresAt < new Date()) return res.status(400).json({ message: 'Code expired' });
-    const existing = await User.findOne({ email: newEmail.toLowerCase() });
+
+    // Fingerprint duplicate check — plaintext email not in DB
+    const pubKey = getPublicKey('user-data');
+    const fp = fingerprint(newEmail.toLowerCase(), pubKey);
+    const existing = await User.findOne({ emailFingerprint: fp });
     if (existing && String(existing._id) !== String(req.user._id)) return res.status(400).json({ message: 'This email is already in use' });
+
     const user = await User.findById(req.user._id);
     user.email = newEmail.toLowerCase();
     user.isEmailVerified = true;
@@ -136,22 +152,31 @@ export const getUsers = async (req, res) => {
     const { page = 1, limit = 1000000, role, search } = req.query;
     const query = { isActive: true };
     if (role) query.role = role;
-    if (search) query.$or = [{ name: { $regex: search, $options: 'i' } }, { email: { $regex: search, $options: 'i' } }];
     const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // When searching: fetch all matching role, decrypt, then filter in-memory
+    // (plaintext PII is not stored in DB so DB-level regex is not possible)
+    if (search) {
+      const allRaw = await User.find(query).sort({ createdAt: -1 });
+      const searchLower = search.toLowerCase();
+      const filtered = allRaw
+        .map(u => (typeof u.getDecryptedData === 'function' ? u.getDecryptedData() : u.toJSON()))
+        .filter(u =>
+          (u.name  && u.name.toLowerCase().includes(searchLower)) ||
+          (u.email && u.email.toLowerCase().includes(searchLower))
+        );
+      const total = filtered.length;
+      const users = filtered.slice(skip, skip + parseInt(limit));
+      return res.json({ data: { users, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) } });
+    }
+
     const [rawUsers, total] = await Promise.all([
-      User.find(query).select('-password -passwordSalt').sort({ createdAt: -1 }).skip(skip).limit(parseInt(limit)),
+      User.find(query).sort({ createdAt: -1 }).skip(skip).limit(parseInt(limit)),
       User.countDocuments(query)
     ]);
-    
-    const users = rawUsers.map(u => {
-      if (typeof u.getDecryptedData === 'function') {
-        return u.getDecryptedData();
-      }
-      const obj = u.toObject();
-      delete obj.password; delete obj.passwordSalt;
-      return obj;
-    });
-
+    const users = rawUsers.map(u =>
+      typeof u.getDecryptedData === 'function' ? u.getDecryptedData() : u.toJSON()
+    );
     res.json({ data: { users, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) } });
   } catch (error) {
     console.error('Get users error:', error);
@@ -203,9 +228,18 @@ export const searchUsers = async (req, res) => {
   try {
     const { q, role } = req.query;
     if (!q || q.trim().length < 2) return res.status(400).json({ message: 'Search query must be at least 2 characters' });
-    const query = { isActive: true, $or: [{ name: { $regex: q, $options: 'i' } }, { email: { $regex: q, $options: 'i' } }] };
+    // Fetch a broad set, decrypt, filter in-memory (plaintext PII not in DB)
+    const query = { isActive: true };
     if (role) query.role = role;
-    const users = await User.find(query).select('-password -passwordSalt').limit(20);
+    const rawUsers = await User.find(query).limit(500);
+    const searchLower = q.trim().toLowerCase();
+    const users = rawUsers
+      .map(u => (typeof u.getDecryptedData === 'function' ? u.getDecryptedData() : u.toJSON()))
+      .filter(u =>
+        (u.name  && u.name.toLowerCase().includes(searchLower)) ||
+        (u.email && u.email.toLowerCase().includes(searchLower))
+      )
+      .slice(0, 20);
     res.json({ data: { users } });
   } catch (error) {
     console.error('Search users error:', error);
