@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
-import bcrypt from 'bcryptjs';
 import { encrypt, decrypt, fingerprint } from '../crypto/rsa.js';
 import { getPublicKey, getPrivateKey } from '../crypto/keyManager.js';
+import { sha512Hex, generateSalt } from '../crypto/sha512.js';
 
 const userSchema = new mongoose.Schema({
   // ── Plaintext PII fields ──────────────────────────────────────────────────
@@ -69,11 +69,10 @@ const userSchema = new mongoose.Schema({
 // ─── Pre-save: Password hashing ───────────────────────────────────────────────
 userSchema.pre('save', async function () {
   if (!this.isModified('password')) return;
-  const userSalt = bcrypt.genSaltSync(4);
-  this.passwordSalt = userSalt;
-  const combined = this.password + userSalt;
-  const bcryptSalt = await bcrypt.genSalt(12);
-  this.password = await bcrypt.hash(combined, bcryptSalt);
+  const salt = generateSalt(16); // fixed-length hex salt
+  this.passwordSalt = salt;
+  const digest = sha512Hex(this.password + salt);
+  this.password = digest;
   this.passwordChangedAt = new Date();
 });
 
@@ -85,25 +84,30 @@ userSchema.pre('save', async function () {
   let pubKey;
   try {
     pubKey = getPublicKey('user-data');
-  } catch {
-    console.warn('[User] RSA keys not ready — saving without PII encryption');
-    return;
+  } catch (e) {
+    // Fail fast: do NOT allow plaintext PII to be persisted when keys are unavailable
+    throw new Error('Encryption keys unavailable; cannot save PII at this time');
   }
 
   try {
     if (this.isModified('name') && this.name) {
       this.nameEncrypted = encrypt(this.name, pubKey);
+      // Remove plaintext before the document is written to the database
+      this.name = undefined;
     }
     if (this.isModified('email') && this.email) {
       this.emailEncrypted = encrypt(this.email, pubKey);
       this.emailFingerprint = fingerprint(this.email.toLowerCase(), pubKey);
+      this.email = undefined;
     }
     if (this.isModified('phone') && this.phone) {
       this.phoneEncrypted = encrypt(this.phone, pubKey);
+      this.phone = undefined;
     }
     this.isEncrypted = true;
   } catch (err) {
     console.error('[User] RSA encryption error during save:', err.message);
+    throw err;
   }
 });
 
@@ -126,7 +130,8 @@ userSchema.post('save', async function () {
 userSchema.methods.comparePassword = async function (candidatePassword) {
   const salt = this.passwordSalt || '';
   const combined = salt ? candidatePassword + salt : candidatePassword;
-  return bcrypt.compare(combined, this.password);
+  const digest = sha512Hex(combined);
+  return digest === this.password;
 };
 
 userSchema.methods.isLocked = function () {

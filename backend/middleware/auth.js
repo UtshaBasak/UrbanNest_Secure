@@ -1,7 +1,6 @@
-import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 import BlockedToken from '../models/BlockedToken.js';
-import { stringToBigInt } from '../crypto/rsa.js';
+import { verifySessionToken } from '../crypto/sessionToken.js';
 
 /**
  * Simple token hashing without built-in crypto.
@@ -16,7 +15,7 @@ function hashToken(token) {
 }
 
 /**
- * Verify JWT access token from HTTP-only cookie.
+ * Verify session token (RSA + CBC-MAC) from HTTP-only cookie.
  * Enforces: token validity, blocklist check, IP/User-Agent binding.
  */
 export const authenticateToken = async (req, res, next) => {
@@ -33,7 +32,15 @@ export const authenticateToken = async (req, res, next) => {
       return res.status(401).json({ message: 'Token has been revoked. Please log in again.' });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    let decoded;
+    try {
+      decoded = verifySessionToken(token, 'session');
+    } catch (err) {
+      if (String(err).toLowerCase().includes('expire')) {
+        return res.status(401).json({ message: 'Token expired.', expired: true });
+      }
+      throw err;
+    }
 
     // IP / User-Agent binding: warn but don't block in dev
     const clientIp = req.ip || req.connection?.remoteAddress || '';

@@ -1,4 +1,4 @@
-import jwt from 'jsonwebtoken';
+import { generateSessionToken, verifySessionToken } from '../crypto/sessionToken.js';
 import { validationResult } from 'express-validator';
 import mongoose from 'mongoose';
 import User from '../models/User.js';
@@ -12,13 +12,14 @@ import RefreshToken from '../models/RefreshToken.js';
 import BlockedToken from '../models/BlockedToken.js';
 import { hashToken } from '../middleware/auth.js';
 import { sendOtpEmail } from '../config/emailService.js';
-import { fingerprint } from '../crypto/rsa.js';
+import { fingerprint, encrypt, decrypt } from '../crypto/rsa.js';
 import { getPublicKey } from '../crypto/keyManager.js';
+import e from 'express';
 
 // ─── Token helpers ───────────────────────────────────────────────────────────
 
 const generateAccessToken = (userId, ip, userAgent) => {
-  return jwt.sign({ userId, ip, userAgent }, process.env.JWT_SECRET, { expiresIn: '15m' });
+  return generateSessionToken({ userId: String(userId), ip, userAgent }, 'session', 15 * 60);
 };
 
 const generateRefreshTokenString = () => {
@@ -32,28 +33,31 @@ const generateRefreshTokenString = () => {
 
 const setAuthCookies = async (res, userId, ip, userAgent) => {
   const accessToken = generateAccessToken(userId, ip, userAgent);
-  const refreshTokenStr = generateRefreshTokenString();
+  const refreshPlain = generateRefreshTokenString();
+  // Encrypt refresh token before storing and issuing to client
+  const sessPub = getPublicKey('session');
+  const refreshEncrypted = encrypt(refreshPlain, sessPub);
   const refreshExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h absolute timeout
 
   await RefreshToken.create({
-    userId, token: refreshTokenStr, ip, userAgent, expiresAt: refreshExpiry,
+    userId, token: refreshEncrypted, ip, userAgent, expiresAt: refreshExpiry,
   });
 
   const cookieBase = {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
+    sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
     path: '/',
   };
   res.cookie('accessToken', accessToken, { ...cookieBase, maxAge: 15 * 60 * 1000 });
-  res.cookie('refreshToken', refreshTokenStr, { ...cookieBase, maxAge: 24 * 60 * 60 * 1000 });
+  res.cookie('refreshToken', refreshEncrypted, { ...cookieBase, maxAge: 24 * 60 * 60 * 1000 });
   // Legacy compat
   res.cookie('token', accessToken, { ...cookieBase, maxAge: 15 * 60 * 1000 });
   return accessToken;
 };
 
 const clearAuthCookies = (res) => {
-  const opts = { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', path: '/' };
+  const opts = { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax', path: '/' };
   res.clearCookie('accessToken', opts);
   res.clearCookie('refreshToken', opts);
   res.clearCookie('token', opts);
@@ -154,7 +158,7 @@ export const verifyOtp = async (req, res) => {
     await Otp.deleteOne({ _id: record._id });
 
     // Return a short-lived verification token
-    const verificationToken = jwt.sign({ email: email.toLowerCase(), purpose, verified: true }, process.env.JWT_SECRET, { expiresIn: '10m' });
+    const verificationToken = generateSessionToken({ email: email.toLowerCase(), purpose, verified: true }, 'otp', 10 * 60);
     res.json({ message: 'Verification successful', verificationToken });
   } catch (error) {
     console.error('Verify OTP error:', error);
@@ -179,23 +183,90 @@ export const register = async (req, res) => {
     const { name, email, password, phone, role, profileImage, verificationToken } = req.body;
 
     if (!verificationToken) return res.status(400).json({ message: 'Email verification is required' });
+
+    // Verify the provided OTP/session token and keep the decoded result
+    let verificationDecoded;
     try {
-      const decoded = jwt.verify(verificationToken, process.env.JWT_SECRET);
-      if (!decoded.verified || decoded.purpose !== 'signup' || decoded.email !== email.toLowerCase()) {
+      verificationDecoded = verifySessionToken(verificationToken, 'otp');
+      if (!verificationDecoded.verified || verificationDecoded.purpose !== 'signup' || verificationDecoded.email !== email.toLowerCase()) {
         return res.status(400).json({ message: 'Invalid or expired email verification' });
       }
     } catch (e) {
       return res.status(400).json({ message: 'Email verification expired. Please verify again.' });
     }
 
+
     const policyErrors = validatePasswordPolicy(password);
     if (policyErrors.length > 0) return res.status(400).json({ message: 'Password does not meet requirements', errors: policyErrors });
 
-    const existingUser = await findUserByEmail(email);
-    if (existingUser) return res.status(400).json({ message: 'User already exists with this email' });
+    // Compute deterministic fingerprint and check for any existing record
+    const pubKeyFp = getPublicKey('user-data');
+    const fp = fingerprint(email.toLowerCase(), pubKeyFp);
+    const existingUser = await User.findOne({ emailFingerprint: fp });
+    if (existingUser) {
+      console.log('[Auth] Registration attempt with existing emailFingerprint:', fp, 'found:', String(existingUser._id), 'active:', existingUser.isActive);
+      // If the caller successfully verified the email just now (verificationDecoded),
+      // allow re-registration by removing the existing record (covers deleted/stale cases
+      // and cases where clients request recreation). This requires possession of the
+      // verification token and thus control over the email address.
+      try {
+        await Promise.all([
+          User.deleteOne({ _id: existingUser._id }),
+          RefreshToken.deleteMany({ userId: existingUser._id }),
+          Otp.deleteMany({ emailFingerprint: fp })
+        ]);
+        console.log('[Auth] Removed existing user record to allow re-registration:', String(existingUser._id));
+      } catch (cleanupErr) {
+        console.error('[Auth] Failed to remove existing user record during registration:', cleanupErr);
+        return res.status(500).json({ message: 'Server error during registration cleanup' });
+      }
+    }
 
     const user = new User({ name, email, password, phone, role: role || 'tenant', profileImage: profileImage || '', isEmailVerified: true });
-    await user.save();
+    try {
+      await user.save();
+      console.log('[Auth] Registered new user:', user._id, user.email);
+    } catch (err) {
+      // Handle duplicate-key errors more robustly by inspecting the duplicate
+      // key value (err.keyValue) and attempting to remove a stale/inactive
+      // document matching that fingerprint, then retrying once.
+      if (err && (err.code === 11000 || String(err).toLowerCase().includes('duplicate'))) {
+        try {
+          console.error('[Auth] Duplicate-key error during registration:', err.message || err);
+          const dupFp = err.keyValue && err.keyValue.emailFingerprint ? err.keyValue.emailFingerprint : null;
+          // If keyValue not provided, fall back to computing fingerprint
+          const pubKeyFp2 = getPublicKey('user-data');
+          const fp2 = dupFp || fingerprint(email.toLowerCase(), pubKeyFp2);
+
+          // Try to find the conflicting document using the duplicate fingerprint
+          const existing2 = await User.findOne({ emailFingerprint: fp2 });
+          if (existing2) {
+            if (!existing2.isActive) {
+              await Promise.all([
+                User.deleteOne({ _id: existing2._id }),
+                RefreshToken.deleteMany({ userId: existing2._id }),
+                Otp.deleteMany({ emailFingerprint: fp2 })
+              ]);
+              console.log('[Auth] Removed stale inactive user (duplicate-key) and retrying:', String(existing2._id));
+              await user.save();
+            } else {
+              console.log('[Auth] Active user blocks registration (duplicate-key):', String(existing2._id));
+              return res.status(400).json({ message: 'User already exists with this email' });
+            }
+          } else {
+            // No document found even though duplicate-key triggered. This may
+            // indicate an index corruption or race; log full error and fail
+            console.error('[Auth] Duplicate-key reported but no document found for fingerprint:', fp2, 'err.keyValue=', err.keyValue);
+            return res.status(500).json({ message: 'Registration conflict. Please try again or contact support.' });
+          }
+        } catch (cleanupErr) {
+          console.error('[Auth] Error handling duplicate-key during registration:', cleanupErr);
+          return res.status(500).json({ message: 'Server error during registration' });
+        }
+      } else {
+        throw err;
+      }
+    }
 
     const ip = req.ip || '';
     const userAgent = req.headers['user-agent'] || '';
@@ -261,7 +332,7 @@ export const login = async (req, res) => {
         await Otp.create({ emailFingerprint: fp2fa, otp: simpleHashOtp(otp), purpose: '2fa-login' });
       await sendOtpEmail(email, otp, '2fa-login');
 
-      const tempToken = jwt.sign({ userId: user._id, purpose: '2fa-pending' }, process.env.JWT_SECRET, { expiresIn: '10m' });
+      const tempToken = generateSessionToken({ userId: String(user._id), purpose: '2fa-pending' }, 'session', 10 * 60);
       return res.json({ message: 'Two-factor authentication required', requires2FA: true, tempToken });
     }
 
@@ -287,7 +358,7 @@ export const verify2FA = async (req, res) => {
 
     let decoded;
     try {
-      decoded = jwt.verify(tempToken, process.env.JWT_SECRET);
+      decoded = verifySessionToken(tempToken, 'session');
     } catch { return res.status(400).json({ message: 'Session expired. Please log in again.' }); }
 
     if (decoded.purpose !== '2fa-pending') return res.status(400).json({ message: 'Invalid token' });
@@ -425,8 +496,10 @@ export const logout = async (req, res) => {
     const accessToken = req.cookies.accessToken || req.cookies.token;
     if (accessToken) {
       try {
-        const decoded = jwt.verify(accessToken, process.env.JWT_SECRET, { ignoreExpiration: true });
-        const expiresAt = new Date((decoded.exp || Math.floor(Date.now() / 1000) + 900) * 1000);
+        // decode payload unsafely to obtain expiry for blocklist
+        const { decodeSessionTokenUnsafe } = await import('../crypto/sessionToken.js');
+        const decoded = decodeSessionTokenUnsafe(accessToken);
+        const expiresAt = new Date(((decoded && decoded.exp) || Math.floor(Date.now() / 1000) + 900) * 1000);
         await BlockedToken.create({ tokenHash: hashToken(accessToken), expiresAt });
       } catch {}
     }
