@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { MapPin, Star, Calendar, User, Phone, Mail, ArrowLeft, Heart, Share2, Pencil, Trash } from 'lucide-react';
-import { getProperty, createBooking, getPropertyReviews, deleteProperty, createReview, canReviewProperty, getMyFavourites, addFavourite, removeFavourite, getProperties } from '../utils/api';
+import { getProperty, createBooking, getPropertyReviews, deleteProperty, createReview, canReviewProperty, getMyFavourites, addFavourite, removeFavourite, getProperties, createConversation } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 
 const PropertyDetails = () => {
@@ -145,6 +145,29 @@ const PropertyDetails = () => {
       alert(err.message || 'Failed to submit review');
     } finally {
       setReviewSubmitting(false);
+    }
+  };
+
+  const handleMessageOwner = async () => {
+    if (!user) {
+      navigate('/login');
+      return;
+    }
+    if (user.role !== 'tenant') {
+      alert('Only tenants can message owners.');
+      return;
+    }
+    try {
+      const ownerId = property.owner?._id || property.owner;
+      const response = await createConversation({
+        participantIds: [ownerId, user._id || user.id],
+        propertyId: property._id
+      });
+      const conversationId = response.data.conversation._id;
+      navigate(`/chat?conversationId=${conversationId}`);
+    } catch (err) {
+      console.error('Create conversation error:', err);
+      alert(err?.message || 'Unable to open chat with owner.');
     }
   };
 
@@ -526,7 +549,7 @@ const PropertyDetails = () => {
                       </div>
                     )}
                   </div>
-                  <div className="ml-4">
+                  <div className="ml-4 flex flex-col gap-2">
                     <button
                       onClick={() => navigate(`/users/${property.owner._id || property.owner.id}`)}
                       className="inline-flex items-center px-3 py-1.5 rounded-md bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-medium transition-colors"
@@ -534,6 +557,14 @@ const PropertyDetails = () => {
                       <User className="h-4 w-4 mr-1" />
                       View Owner Profile
                     </button>
+                    {user && user.role === 'tenant' && String(property.owner?._id || property.owner) !== String(user._id || user.id) && (
+                      <button
+                        onClick={handleMessageOwner}
+                        className="inline-flex items-center justify-center px-3 py-1.5 rounded-md border border-cyan-600 text-cyan-600 hover:bg-cyan-600 hover:text-white transition-colors text-sm font-medium"
+                      >
+                        Message Owner
+                      </button>
+                    )}
                   </div>
                 </div>
 

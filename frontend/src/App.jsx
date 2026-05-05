@@ -23,6 +23,7 @@ import PropertyReviews from './pages/PropertyReviews';
 import PropertyReviewNew from './pages/PropertyReviewNew';
 import Favourites from './pages/Favourites';
 import Compare from './pages/Compare';
+import Chat from './pages/Chat';
 import ProtectedRoute from './components/ProtectedRoute';
 import LeaveRequests from './pages/LeaveRequests';
 import LeaveRequestNew from './pages/LeaveRequestNew';
@@ -135,6 +136,14 @@ function App() {
                   element={
                     <ProtectedRoute>
                       <Notifications />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/chat"
+                  element={
+                    <ProtectedRoute>
+                      <Chat />
                     </ProtectedRoute>
                   }
                 />

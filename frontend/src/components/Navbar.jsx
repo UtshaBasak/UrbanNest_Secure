@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { Sun, Moon } from 'lucide-react';
+import { Sun, Moon, MessageCircle } from 'lucide-react';
 import SearchDropdown from './SearchDropdown';
 
 const Navbar = () => {
@@ -223,6 +223,15 @@ const Navbar = () => {
                 className="px-3 py-2 rounded-full text-sm font-medium text-neutral-700 dark:text-neutral-300 hover:bg-cyan-100 dark:hover:bg-cyan-900/50 transition-all duration-200"
               >
                 Notifications
+              </Link>
+            )}
+            {user && (
+              <Link
+                to="/chat"
+                className="px-3 py-2 rounded-full text-sm font-medium text-neutral-700 dark:text-neutral-300 hover:bg-cyan-100 dark:hover:bg-cyan-900/50 transition-all duration-200"
+              >
+                <MessageCircle className="h-4 w-4 inline-block mr-1" />
+                Messages
               </Link>
             )}
             <Link
@@ -459,6 +468,15 @@ const Navbar = () => {
                 className="px-4 py-3 rounded-xl hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-all duration-200 font-medium"
               >
                 Notifications
+              </Link>
+            )}
+            {user && (
+              <Link
+                to="/chat"
+                onClick={() => setIsMenuOpen(false)}
+                className="px-4 py-3 rounded-xl hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-all duration-200 font-medium"
+              >
+                Messages
               </Link>
             )}
 

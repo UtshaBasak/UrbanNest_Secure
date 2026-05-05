@@ -15,7 +15,7 @@ import {
   Heart
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { getUser, getPropertiesByOwner, updateProfile, createUserRating, canRateUser, canViewTenantContact, getMyFavourites, addFavourite, removeFavourite } from '../utils/api';
+import { getUser, getPropertiesByOwner, updateProfile, createUserRating, canRateUser, canViewTenantContact, getMyFavourites, addFavourite, removeFavourite, createConversation } from '../utils/api';
 
 const UserProfile = () => {
   const { id } = useParams();
@@ -212,6 +212,23 @@ const UserProfile = () => {
     setIsEditing(!isEditing);
   };
 
+  const handleMessageUser = async () => {
+    if (!currentUser) {
+      navigate('/login');
+      return;
+    }
+    try {
+      const response = await createConversation({
+        participantIds: [id, currentUser._id || currentUser.id]
+      });
+      const conversationId = response.data.conversation._id;
+      navigate(`/chat?conversationId=${conversationId}`);
+    } catch (err) {
+      console.error('Create conversation error:', err);
+      alert(err?.message || 'Unable to open chat.');
+    }
+  };
+
   const handleUpdateProfile = async (e) => {
     e.preventDefault();
     try {
@@ -296,17 +313,25 @@ const UserProfile = () => {
             Back
           </button>
           <div className="flex items-center gap-3">
-          {!isOwnProfile && user?.role === 'owner' && currentUser?.role === 'tenant' && (
-            <button
-              onClick={toggleOwnerFavourite}
-              disabled={favLoading}
-              aria-label={isOwnerFavourited ? 'Remove favourite owner' : 'Add favourite owner'}
-              className="p-2 rounded-lg bg-white dark:bg-neutral-800 shadow-md hover:shadow-lg transition-shadow"
-              title={isOwnerFavourited ? 'Remove from favourites' : 'Add to favourites'}
-            >
-              <Heart className={`h-5 w-5 ${isOwnerFavourited ? 'text-red-500 fill-current' : 'text-neutral-600 dark:text-neutral-400'}`} />
-            </button>
-          )}
+            {!isOwnProfile && ((currentUser?.role === 'tenant' && user?.role === 'owner') || (currentUser?.role === 'owner' && user?.role === 'tenant')) && (
+              <button
+                onClick={handleMessageUser}
+                className="inline-flex items-center rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700 transition-colors"
+              >
+                Message {user?.role === 'owner' ? 'Owner' : 'Tenant'}
+              </button>
+            )}
+            {!isOwnProfile && user?.role === 'owner' && currentUser?.role === 'tenant' && (
+              <button
+                onClick={toggleOwnerFavourite}
+                disabled={favLoading}
+                aria-label={isOwnerFavourited ? 'Remove favourite owner' : 'Add favourite owner'}
+                className="p-2 rounded-lg bg-white dark:bg-neutral-800 shadow-md hover:shadow-lg transition-shadow"
+                title={isOwnerFavourited ? 'Remove from favourites' : 'Add to favourites'}
+              >
+                <Heart className={`h-5 w-5 ${isOwnerFavourited ? 'text-red-500 fill-current' : 'text-neutral-600 dark:text-neutral-400'}`} />
+              </button>
+            )}
           </div>
         </div>
 

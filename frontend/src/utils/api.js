@@ -482,3 +482,50 @@ export const deleteReviewById = async (id, type) => {
   const response = await fetch(endpoint, { method: 'DELETE', credentials: 'include' });
   return handleResponse(response);
 };
+
+// Chat API functions
+export const getMyConversations = async () => {
+  const response = await fetch(`${API_BASE_URL}/chat`, {
+    credentials: 'include'
+  });
+  return handleResponse(response);
+};
+
+export const createConversation = async ({ participantIds, propertyId }) => {
+  const response = await fetch(`${API_BASE_URL}/chat`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    credentials: 'include',
+    body: JSON.stringify({ participantIds, propertyId })
+  });
+  return handleResponse(response);
+};
+
+export const getConversationMessages = async (conversationId) => {
+  const response = await fetch(`${API_BASE_URL}/chat/${conversationId}/messages`, {
+    credentials: 'include'
+  });
+  return handleResponse(response);
+};
+
+export const sendChatMessage = async (conversationId, text) => {
+  const response = await fetch(`${API_BASE_URL}/chat/${conversationId}/messages`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    credentials: 'include',
+    body: JSON.stringify({ text })
+  });
+  return handleResponse(response);
+};
+
+export const markConversationRead = async (conversationId) => {
+  const response = await fetch(`${API_BASE_URL}/chat/${conversationId}/read`, {
+    method: 'PATCH',
+    credentials: 'include'
+  });
+  return handleResponse(response);
+};
