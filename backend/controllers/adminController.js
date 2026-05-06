@@ -149,7 +149,7 @@ export const getProperties = async (req, res) => {
     }
 
     const properties = await Property.find(query)
-      .populate('owner', 'name email phone')
+      .populate('owner', 'nameEncrypted emailEncrypted phoneEncrypted profileImage isEncrypted')
       .sort({ createdAt: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit);

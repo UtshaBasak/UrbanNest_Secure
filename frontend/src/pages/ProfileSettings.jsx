@@ -27,6 +27,12 @@ const ProfileSettings = () => {
   const [tfaLoading, setTfaLoading] = useState(false);
   const [tfaError, setTfaError] = useState('');
 
+  // ─── Delete Account State ──────────────────────────────────────────────────
+  const [deleteModal, setDeleteModal] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+
   useEffect(() => {
     if (user) {
       setEditForm({ name: user.name || '', phone: user.phone || '', profileImage: user.profileImage || '', role: user.role || 'tenant' });
@@ -97,6 +103,21 @@ const ProfileSettings = () => {
     finally { setTfaLoading(false); }
   };
 
+  // ─── Delete Account handlers ────────────────────────────────────────────────
+  const handleDeleteAccount = async () => {
+    if (!deletePassword) { setDeleteError('Password is required'); return; }
+    setDeleteLoading(true); setDeleteError('');
+    try {
+      await deleteCurrentUser(deletePassword);
+      await logout();
+      navigate('/');
+    } catch (err) {
+      setDeleteError(err.message || 'Failed to delete account');
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
   if (loading) return <div className="min-h-screen flex items-center justify-center text-lg">Loading...</div>;
   if (!user) return <div className="min-h-screen flex items-center justify-center text-lg text-red-600">You must be logged in.</div>;
 
@@ -153,10 +174,9 @@ const ProfileSettings = () => {
                   <Save className="h-4 w-4 mr-2" /> {saving ? 'Saving...' : 'Save Changes'}
                 </button>
                 {user?.role !== 'admin' && (
-                  <button onClick={async (e) => {
+                  <button onClick={(e) => {
                     e.preventDefault();
-                    if (!window.confirm('Are you sure you want to delete your profile?')) return;
-                    try { await deleteCurrentUser(); await logout(); navigate('/'); } catch { alert('Failed to delete account'); }
+                    setDeleteModal(true);
                   }} className="inline-flex px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs">Delete Account</button>
                 )}
               </div>
@@ -310,6 +330,36 @@ const ProfileSettings = () => {
             <button onClick={handleToggle2FA} disabled={tfaLoading || !tfaPassword}
               className={`w-full py-2.5 rounded-lg font-medium text-white disabled:opacity-50 ${user.twoFactorEnabled ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`}>
               {tfaLoading ? 'Processing...' : user.twoFactorEnabled ? 'Disable 2FA' : 'Enable 2FA'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ Delete Account Modal ══════════════════════════════════════════════ */}
+      {deleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => { setDeleteModal(false); setDeleteError(''); setDeletePassword(''); }}>
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+          <div className="relative bg-white dark:bg-neutral-800 rounded-2xl shadow-2xl max-w-sm w-full p-6 animate-slide-up" onClick={e => e.stopPropagation()}>
+            <button onClick={() => { setDeleteModal(false); setDeleteError(''); setDeletePassword(''); }} className="absolute top-4 right-4 text-neutral-400 hover:text-neutral-600"><X className="w-5 h-5" /></button>
+            <div className="flex items-center gap-3 mb-4">
+              <AlertCircle className="w-6 h-6 text-red-600" />
+              <h3 className="text-lg font-bold text-neutral-900 dark:text-white">Delete Account</h3>
+            </div>
+            <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-4">Are you sure you want to delete your profile? This action cannot be undone. Enter your password to confirm.</p>
+            {deleteError && (
+              <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 rounded-lg flex items-center space-x-2">
+                <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" /><span className="text-red-700 dark:text-red-300 text-sm">{deleteError}</span>
+              </div>
+            )}
+            <div className="relative mb-4">
+              <Lock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
+              <input type="password" value={deletePassword} onChange={(e) => { setDeletePassword(e.target.value); setDeleteError(''); }} autoFocus
+                className="w-full h-11 rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-red-600 pl-12"
+                placeholder="Enter your password" />
+            </div>
+            <button onClick={handleDeleteAccount} disabled={deleteLoading || !deletePassword}
+              className="w-full py-2.5 rounded-lg font-medium text-white disabled:opacity-50 bg-red-600 hover:bg-red-700">
+              {deleteLoading ? 'Deleting...' : 'Delete Account'}
             </button>
           </div>
         </div>

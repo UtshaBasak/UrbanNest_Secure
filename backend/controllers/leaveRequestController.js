@@ -55,10 +55,11 @@ export const createLeaveRequest = async (req, res) => {
 
     // Notify owner
     try {
+      const tenantDecrypted = req.user.getDecryptedData();
       await createNotification({
         user: booking.property.owner,
         title: 'Leave request received',
-        message: `${req.user.name || 'Tenant'} requested to leave early for ${booking.property.title}.`,
+        message: `${tenantDecrypted.name || 'Tenant'} requested to leave early for ${booking.property.title}.`,
         link: `/dashboard?tab=bookings`,
         meta: { bookingId: booking._id, leaveRequestId: lr._id }
       });

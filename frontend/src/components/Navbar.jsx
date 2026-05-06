@@ -2,8 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { Sun, Moon, MessageCircle } from 'lucide-react';
+import { Sun, Moon, Bell } from 'lucide-react';
 import SearchDropdown from './SearchDropdown';
+import { getMyNotifications } from '../utils/api';
 
 const Navbar = () => {
   const { user, logout } = useAuth();
@@ -25,6 +26,26 @@ const Navbar = () => {
   const [fabIn, setFabIn] = useState(false);
   // Profile submenu inside floating menu
   const [showProfileSubmenu, setShowProfileSubmenu] = useState(false);
+  const [unreadNotifs, setUnreadNotifs] = useState(0);
+
+  // Fetch unread notifications count
+  useEffect(() => {
+    if (user) {
+      const fetchUnread = async () => {
+        try {
+          const res = await getMyNotifications({ unreadOnly: true, limit: 1 });
+          setUnreadNotifs(res.data.total || 0);
+        } catch (error) {
+          console.error(error);
+        }
+      };
+      fetchUnread();
+      const interval = setInterval(fetchUnread, 30000);
+      return () => clearInterval(interval);
+    } else {
+      setUnreadNotifs(0);
+    }
+  }, [user]);
 
   // Close mobile menu when clicking outside
   useEffect(() => {
@@ -220,9 +241,17 @@ const Navbar = () => {
             {user && (
               <Link
                 to="/notifications"
-                className="px-3 py-2 rounded-full text-sm font-medium text-neutral-700 dark:text-neutral-300 hover:bg-cyan-100 dark:hover:bg-cyan-900/50 transition-all duration-200"
+                className="relative px-3 py-2 rounded-full text-sm font-medium text-neutral-700 dark:text-neutral-300 hover:bg-cyan-100 dark:hover:bg-cyan-900/50 transition-all duration-200"
               >
-                Notifications
+                <div className="flex items-center gap-1.5">
+                  <Bell className="w-4 h-4" />
+                  <span>Notifications</span>
+                  {unreadNotifs > 0 && (
+                    <span className="absolute top-0 right-0 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white shadow-sm ring-2 ring-white dark:ring-neutral-900">
+                      {unreadNotifs > 99 ? '99+' : unreadNotifs}
+                    </span>
+                  )}
+                </div>
               </Link>
             )}
             {user && (
@@ -230,7 +259,6 @@ const Navbar = () => {
                 to="/chat"
                 className="px-3 py-2 rounded-full text-sm font-medium text-neutral-700 dark:text-neutral-300 hover:bg-cyan-100 dark:hover:bg-cyan-900/50 transition-all duration-200"
               >
-                <MessageCircle className="h-4 w-4 inline-block mr-1" />
                 Messages
               </Link>
             )}
@@ -394,7 +422,14 @@ const Navbar = () => {
                 <Link to="/owners" onClick={() => setShowFloatingMenu(false)} className="block px-3 py-2 rounded-lg hover:bg-cyan-100 dark:hover:bg-cyan-900/50 text-sm font-medium text-neutral-900 dark:text-neutral-100">Owners</Link>
                 <Link to="/tenants" onClick={() => setShowFloatingMenu(false)} className="block px-3 py-2 rounded-lg hover:bg-cyan-100 dark:hover:bg-cyan-900/50 text-sm font-medium text-neutral-900 dark:text-neutral-100">Tenants</Link>
                 {user && (
-                  <Link to="/notifications" onClick={() => setShowFloatingMenu(false)} className="block px-3 py-2 rounded-lg hover:bg-cyan-100 dark:hover:bg-cyan-900/50 text-sm font-medium text-neutral-900 dark:text-neutral-100">Notifications</Link>
+                  <Link to="/notifications" onClick={() => setShowFloatingMenu(false)} className="block px-3 py-2 rounded-lg hover:bg-cyan-100 dark:hover:bg-cyan-900/50 text-sm font-medium text-neutral-900 dark:text-neutral-100 flex items-center justify-between">
+                    <span>Notifications</span>
+                    {unreadNotifs > 0 && (
+                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
+                        {unreadNotifs > 99 ? '99+' : unreadNotifs}
+                      </span>
+                    )}
+                  </Link>
                 )}
                 <Link to="/compare" onClick={() => setShowFloatingMenu(false)} className="block px-3 py-2 rounded-lg hover:bg-cyan-100 dark:hover:bg-cyan-900/50 text-sm font-medium text-neutral-900 dark:text-neutral-100">Compare</Link>
                 {user?.role === 'tenant' && (
@@ -465,9 +500,14 @@ const Navbar = () => {
               <Link
                 to="/notifications"
                 onClick={() => setIsMenuOpen(false)}
-                className="px-4 py-3 rounded-xl hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-all duration-200 font-medium"
+                className="flex items-center justify-between px-4 py-3 rounded-xl hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-all duration-200 font-medium"
               >
-                Notifications
+                <span>Notifications</span>
+                {unreadNotifs > 0 && (
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
+                    {unreadNotifs > 99 ? '99+' : unreadNotifs}
+                  </span>
+                )}
               </Link>
             )}
             {user && (

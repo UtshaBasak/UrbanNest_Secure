@@ -125,8 +125,13 @@ export const updateProfile = async (userId, profileData) => {
   return handleResponse(response);
 };
 
-export const deleteCurrentUser = async () => {
-  const response = await fetch(`${API_BASE_URL}/auth/me`, { method: 'DELETE', credentials: 'include' });
+export const deleteCurrentUser = async (password) => {
+  const response = await fetch(`${API_BASE_URL}/auth/me`, { 
+    method: 'DELETE', 
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ password })
+  });
   return handleResponse(response);
 };
 

@@ -436,14 +436,13 @@ export const forgotPassword = async (req, res) => {
     if (!email) return res.status(400).json({ message: 'Email is required' });
 
     const user = await findUserByEmail(email);
-    // Always return success to prevent email enumeration
     if (!user) return res.json({ message: 'If an account exists with this email, a verification code has been sent.' });
 
     const otp = generateOtp();
     const pubKeyForgot = getPublicKey('user-data');
     const fpForgot = fingerprint(email.toLowerCase(), pubKeyForgot);
     await Otp.deleteMany({ emailFingerprint: fpForgot, purpose: 'forgot-password' });
-    await Otp.create({ emailFingerprint: fpForgot, otp: simpleHashOtp(otp), purpose: 'forgot-password' });
+    await Otp.create({ emailFingerprint: fpForgot, otp: simpleHashOtp(otp), purpose: 'forgot-password' }); 
     await sendOtpEmail(email, otp, 'forgot-password');
 
     res.json({ message: 'If an account exists with this email, a verification code has been sent.' });
@@ -547,6 +546,20 @@ export const updateCurrentUser = async (req, res) => {
 // ─── Delete Current User ─────────────────────────────────────────────────────
 export const deleteCurrentUser = async (req, res) => {
   const userId = req.user._id;
+  const { password } = req.body;
+
+  if (!password) {
+    return res.status(400).json({ message: 'Password is required to delete account' });
+  }
+
+  const userWithPassword = await User.findById(userId).select('+password +passwordSalt');
+  if (!userWithPassword) return res.status(404).json({ message: 'User not found' });
+
+  const isPasswordValid = await userWithPassword.comparePassword(password);
+  if (!isPasswordValid) {
+    return res.status(401).json({ message: 'Incorrect password' });
+  }
+
   const session = await mongoose.startSession();
   try {
     await session.withTransaction(async () => {

@@ -37,6 +37,7 @@ const Owners = () => {
       try {
         setLoading(true);
         const res = await getUsers({ role: 'owner' });
+        console.log(res.data);  
         setOwners(res.data.users || []);
       } catch (e) {
         setError('Failed to fetch owners');
@@ -52,6 +53,7 @@ const Owners = () => {
       try {
         if (!currentUser || currentUser.role !== 'tenant') return;
         const res = await getMyBookings({ status: 'approved', limit: 100 });
+        console.log(res.data);  
         const ids = new Set();
         (res.data.bookings || []).forEach(b => {
           if (b.property?.owner) ids.add(b.property.owner._id || b.property.owner);

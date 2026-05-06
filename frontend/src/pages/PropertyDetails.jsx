@@ -153,10 +153,6 @@ const PropertyDetails = () => {
       navigate('/login');
       return;
     }
-    if (user.role !== 'tenant') {
-      alert('Only tenants can message owners.');
-      return;
-    }
     try {
       const ownerId = property.owner?._id || property.owner;
       const response = await createConversation({
@@ -552,17 +548,17 @@ const PropertyDetails = () => {
                   <div className="ml-4 flex flex-col gap-2">
                     <button
                       onClick={() => navigate(`/users/${property.owner._id || property.owner.id}`)}
-                      className="inline-flex items-center px-3 py-1.5 rounded-md bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-medium transition-colors"
+                      className="inline-flex items-center justify-center px-3 py-1.5 rounded-md border border-cyan-600 text-cyan-600 hover:bg-cyan-600 hover:text-white transition-colors text-sm font-medium"
                     >
                       <User className="h-4 w-4 mr-1" />
                       View Owner Profile
                     </button>
-                    {user && user.role === 'tenant' && String(property.owner?._id || property.owner) !== String(user._id || user.id) && (
+                    {(!user || String(property.owner?._id || property.owner) !== String(user?._id || user?.id)) && (
                       <button
                         onClick={handleMessageOwner}
                         className="inline-flex items-center justify-center px-3 py-1.5 rounded-md border border-cyan-600 text-cyan-600 hover:bg-cyan-600 hover:text-white transition-colors text-sm font-medium"
                       >
-                        Message Owner
+                        Chat with Owner
                       </button>
                     )}
                   </div>
@@ -650,13 +646,16 @@ const PropertyDetails = () => {
                 </div>
               )}
 
-              {/* Booking card for logged-in tenants only, when property is Available */}
-              {(user && user.role === 'tenant') && (
+              {/* Booking card for guests and logged-in tenants, when property is Available */}
+              {(!user || String(property.owner?._id || property.owner) !== String(user._id || user.id)) && (
                 <div>
                   <h2 className="text-xl font-semibold text-neutral-900 dark:text-white mb-4">Book This Property</h2>
                   {(property.availabilityStatus || property.availability) === 'Available' ? (
                     <button
-                      onClick={() => setShowBookingModal(true)}
+                      onClick={() => {
+                        if (!user) navigate('/login');
+                        else setShowBookingModal(true);
+                      }}
                       className="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-medium py-3 px-4 rounded-lg transition-colors"
                     >
                       Book Now

@@ -110,7 +110,7 @@ const Chat = () => {
         if (c._id === selectedConversationId) {
           return {
             ...c,
-            lastMessage: '🔒 Encrypted message',
+            lastMessage: trimmed,
             updatedAt: res.data.message.createdAt,
             unreadCount: 0
           };
@@ -132,9 +132,6 @@ const Chat = () => {
 
   const formatPreview = (lastMessage) => {
     if (!lastMessage) return 'No messages yet';
-    if (lastMessage === '🔒 Encrypted message' || lastMessage === '[encrypted]') {
-      return '🔒 Encrypted message';
-    }
     return lastMessage;
   };
 
@@ -158,7 +155,7 @@ const Chat = () => {
             {/* ECC Encryption badge */}
             <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 dark:bg-emerald-900/30 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
               <Lock className="h-3 w-3" />
-              ECC Encrypted
+              Encrypted
             </span>
           </div>
         </div>
@@ -312,7 +309,7 @@ const Chat = () => {
                     type="text"
                     value={messageText}
                     onChange={(e) => setMessageText(e.target.value)}
-                    placeholder="🔒 Type a secure message..."
+                    placeholder="Type your message..."
                     maxLength={2000}
                     className="flex-1 rounded-3xl border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-900 px-4 py-3 text-sm text-neutral-900 dark:text-white focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
                   />

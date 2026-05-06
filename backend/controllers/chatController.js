@@ -83,7 +83,7 @@ export const getMyConversations = async (req, res) => {
   try {
     const conversations = await Conversation.find({ participants: req.user._id })
       .sort({ updatedAt: -1 })
-      .populate('participants', 'name profileImage role')
+      .populate('participants', 'nameEncrypted profileImage role isEncrypted')
       .populate('property', 'title');
 
     const conversationsWithUnread = await Promise.all(conversations.map(async (conversation) => {
@@ -97,7 +97,7 @@ export const getMyConversations = async (req, res) => {
         (participant) => String(participant._id) !== String(req.user._id)
       );
       // Strip ECC keys from the response — never expose private key to frontend
-      const convObj = conversation.toObject();
+      const convObj = conversation.toJSON();
       delete convObj.eccPrivateKey;
       delete convObj.eccPublicKey;
       return { ...convObj, otherParticipant, unreadCount };
@@ -121,7 +121,7 @@ export const getConversationMessages = async (req, res) => {
     }
 
     const conversation = await Conversation.findOne({ _id: id, participants: req.user._id })
-      .populate('participants', 'name profileImage role')
+      .populate('participants', 'nameEncrypted profileImage role isEncrypted')
       .populate('property', 'title');
 
     if (!conversation) {
@@ -130,11 +130,11 @@ export const getConversationMessages = async (req, res) => {
 
     const rawMessages = await Message.find({ conversation: conversation._id })
       .sort({ createdAt: 1 })
-      .populate('sender', 'name profileImage role');
+      .populate('sender', 'nameEncrypted profileImage role isEncrypted');
 
     // Decrypt each encrypted message using the conversation's ECC private key
     const messages = rawMessages.map((msg) => {
-      const msgObj = msg.toObject();
+      const msgObj = msg.toJSON();
 
       if (msgObj.isEncrypted && msgObj.encryptedEnvelope) {
         if (!conversation.eccPrivateKey) {
@@ -157,7 +157,7 @@ export const getConversationMessages = async (req, res) => {
     });
 
     // Strip ECC keys from conversation before sending to frontend
-    const convObj = conversation.toObject();
+    const convObj = conversation.toJSON();
     delete convObj.eccPrivateKey;
     delete convObj.eccPublicKey;
 
@@ -209,28 +209,29 @@ export const sendMessage = async (req, res) => {
     });
 
     // lastMessage preview — safe placeholder, never leaks content
-    conversation.lastMessage = '🔒 Encrypted message';
+    conversation.lastMessage = text.trim();
     await conversation.save();
 
     const recipientId = conversation.participants.find(
       (participantId) => String(participantId) !== String(req.user._id)
     );
 
+    const senderDecrypted = req.user.getDecryptedData();
     if (recipientId) {
       await Notification.create({
         user: recipientId,
         title: 'New message',
-        message: `${req.user.name} sent you a message.`,
+        message: `${senderDecrypted.name} sent you a message.`,
         link: `/chat?conversationId=${conversation._id}`,
         meta: { conversationId: conversation._id }
       });
     }
 
-    await message.populate('sender', 'name profileImage role');
+    await message.populate('sender', 'nameEncrypted profileImage role isEncrypted');
 
     // Return the message with the PLAINTEXT (not the envelope) so the sender
     // sees their own message immediately without an extra decrypt round-trip.
-    const responseMsg = message.toObject();
+    const responseMsg = message.toJSON();
     responseMsg.text = text.trim();      // sender sees their own plaintext in UI
     delete responseMsg.encryptedEnvelope; // never expose raw envelope to frontend
 

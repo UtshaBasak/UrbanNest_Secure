@@ -42,7 +42,7 @@ export const getSuggestedProperties = async (req, res) => {
       })
         .sort({ createdAt: -1 })
         .limit(8)
-        .populate('owner', 'name email phone');
+        .populate('owner', 'nameEncrypted emailEncrypted phoneEncrypted profileImage isEncrypted');
     }
 
     // If not enough, fill with recent properties
@@ -53,7 +53,7 @@ export const getSuggestedProperties = async (req, res) => {
       })
         .sort({ createdAt: -1 })
         .limit(8 - suggested.length)
-        .populate('owner', 'name email phone');
+        .populate('owner', 'nameEncrypted emailEncrypted phoneEncrypted profileImage isEncrypted');
       suggested = [...suggested, ...more];
     }
 
@@ -66,7 +66,7 @@ export const getSuggestedProperties = async (req, res) => {
 
     const ratingMap = new Map(reviewAggregation.map(r => [String(r._id), r]));
     suggested = suggested.map(p => ({
-      ...p.toObject(),
+      ...p.toJSON(),
       averageRating: ratingMap.get(String(p._id))?.averageRating || 0,
       totalReviews: ratingMap.get(String(p._id))?.totalReviews || 0
     }));
@@ -147,7 +147,7 @@ export const getProperties = async (req, res) => {
     sortOptions[sortBy] = sortOrder === 'desc' ? -1 : 1;
 
     let properties = await Property.find(query)
-      .populate('owner', 'name email phone')
+      .populate('owner', 'nameEncrypted emailEncrypted phoneEncrypted profileImage isEncrypted')
       .sort(sortOptions)
       .limit(limit * 1)
       .skip((page - 1) * limit);
@@ -191,7 +191,7 @@ export const getProperties = async (req, res) => {
     
     properties = properties.map(p => {
       const b = byProp.get(p._id.toString());
-      const obj = p.toObject();
+      const obj = p.toJSON();
       if (b) obj.currentTenant = { id: b.tenant._id, name: b.tenant.name };
       return obj;
     });
@@ -246,12 +246,11 @@ export const getTopRatedProperties = async (req, res) => {
 
     const ids = agg.map(a => a._id);
     const props = await Property.find({ _id: { $in: ids }, isActive: true })
-      .populate('owner', 'name email phone')
-      .lean();
+      .populate('owner', 'nameEncrypted emailEncrypted phoneEncrypted profileImage isEncrypted');
 
     const map = new Map(agg.map(a => [String(a._id), a]));
     const properties = props.map(p => ({
-      ...p,
+      ...p.toJSON(),
       averageRating: map.get(String(p._id))?.averageRating || 0,
       totalReviews: map.get(String(p._id))?.totalReviews || 0
     }));
@@ -271,7 +270,7 @@ export const getTopRatedProperties = async (req, res) => {
 export const getProperty = async (req, res) => {
   try {
     const propertyDoc = await Property.findById(req.params.id)
-      .populate('owner', 'name email phone profileImage');
+      .populate('owner', 'nameEncrypted emailEncrypted phoneEncrypted profileImage isEncrypted');
 
     if (!propertyDoc) {
       return res.status(404).json({ message: 'Property not found' });
@@ -295,7 +294,7 @@ export const getProperty = async (req, res) => {
       }).sort({ startDate: 1 }).populate('tenant', 'name');
     }
 
-    const property = propertyDoc.toObject();
+    const property = propertyDoc.toJSON();
     if (activeBooking) {
       property.currentTenant = { id: activeBooking.tenant._id, name: activeBooking.tenant.name };
     }
@@ -327,7 +326,7 @@ export const getProperty = async (req, res) => {
 export const getPropertyByPropertyId = async (req, res) => {
   try {
     const propertyDoc = await Property.findOne({ propertyId: req.params.propertyId })
-      .populate('owner', 'name email phone profileImage');
+      .populate('owner', 'nameEncrypted emailEncrypted phoneEncrypted profileImage isEncrypted');
 
     if (!propertyDoc) {
       return res.status(404).json({ message: 'Property not found' });
@@ -351,7 +350,7 @@ export const getPropertyByPropertyId = async (req, res) => {
       }).sort({ startDate: 1 }).populate('tenant', 'name');
     }
 
-    const property = propertyDoc.toObject();
+    const property = propertyDoc.toJSON();
     if (activeBooking) {
       property.currentTenant = { id: activeBooking.tenant._id, name: activeBooking.tenant.name };
     }
@@ -419,7 +418,7 @@ export const createProperty = async (req, res) => {
     await property.save();
 
     const populatedProperty = await Property.findById(property._id)
-      .populate('owner', 'name email phone');
+      .populate('owner', 'nameEncrypted emailEncrypted phoneEncrypted profileImage isEncrypted');
 
     res.status(201).json({
       message: 'Property created successfully',
@@ -456,7 +455,7 @@ export const updateProperty = async (req, res) => {
       req.params.id,
       req.body,
       { new: true, runValidators: true }
-    ).populate('owner', 'name email phone');
+    ).populate('owner', 'nameEncrypted emailEncrypted phoneEncrypted profileImage isEncrypted');
 
     res.json({
       message: 'Property updated successfully',
@@ -529,7 +528,7 @@ export const getPropertiesByOwner = async (req, res) => {
       owner: ownerId, 
       isActive: true 
     })
-      .populate('owner', 'name email phone')
+      .populate('owner', 'nameEncrypted emailEncrypted phoneEncrypted profileImage isEncrypted')
       .sort({ createdAt: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit);
@@ -543,7 +542,7 @@ export const getPropertiesByOwner = async (req, res) => {
 
     const ratingMap = new Map(reviewAggregation.map(r => [String(r._id), r]));
     const propertiesWithRatings = properties.map(p => ({
-      ...p.toObject(),
+      ...p.toJSON(),
       averageRating: ratingMap.get(String(p._id))?.averageRating || 0,
       totalReviews: ratingMap.get(String(p._id))?.totalReviews || 0
     }));

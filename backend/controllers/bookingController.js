@@ -131,10 +131,11 @@ export const createBooking = async (req, res) => {
 
     // Notify owner about new booking request
     try {
+      const tenantDecrypted = req.user.getDecryptedData();
       await createNotification({
         user: property.owner,
         title: 'New booking request',
-        message: `${req.user.name || 'A tenant'} requested to book ${property.title} (${new Date(startDate).toLocaleDateString()} - ${new Date(endDate).toLocaleDateString()}).`,
+        message: `${tenantDecrypted.name || 'A tenant'} requested to book ${property.title} (${new Date(startDate).toLocaleDateString()} - ${new Date(endDate).toLocaleDateString()}).`,
         link: `/dashboard?tab=bookings`,
         meta: { bookingId: booking._id, propertyId: property._id }
       });
@@ -389,10 +390,11 @@ export const cancelBooking = async (req, res) => {
 
     // Notify owner that tenant cancelled
     try {
+      const tenantDecrypted = req.user.getDecryptedData();
       await createNotification({
         user: (await Property.findById(booking.property)).owner,
         title: 'Booking cancelled',
-        message: `${req.user.name || 'Tenant'} cancelled a booking request for your property.`,
+        message: `${tenantDecrypted.name || 'Tenant'} cancelled a booking request for your property.`,
         link: `/dashboard?tab=bookings`,
         meta: { bookingId: booking._id, propertyId: booking.property }
       });
