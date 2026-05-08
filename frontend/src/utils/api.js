@@ -239,7 +239,7 @@ export const deleteBooking = async (id) => {
 // ─── Reviews ──────────────────────────────────────────────────────────────────
 
 export const getReviews = async (propertyId) => {
-  const response = await fetch(`${API_BASE_URL}/reviews?property=${propertyId}`, { credentials: 'include' });
+  const response = await fetch(`${API_BASE_URL}/reviews/property/${propertyId}`, { credentials: 'include' });
   return handleResponse(response);
 };
 
@@ -269,7 +269,7 @@ export const deleteReview = async (id) => {
 };
 
 export const canReviewProperty = async (propertyId) => {
-  const response = await fetch(`${API_BASE_URL}/reviews/can-review/${propertyId}`, { credentials: 'include' });
+  const response = await fetch(`${API_BASE_URL}/reviews/can-review/check?propertyId=${propertyId}`, { credentials: 'include' });
   return handleResponse(response);
 };
 
@@ -336,15 +336,18 @@ export const removeFavourite = async (itemId, itemType) => {
 
 // ─── Ratings ──────────────────────────────────────────────────────────────────
 
-export const getUserRatings = async (userId) => {
-  const response = await fetch(`${API_BASE_URL}/ratings/user/${userId}`, { credentials: 'include' });
+export const getUserRatings = async (userId, params = {}) => {
+  const sp = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') sp.append(k, v); });
+  const qs = sp.toString() ? `?${sp.toString()}` : '';
+  const response = await fetch(`${API_BASE_URL}/ratings/${userId}${qs}`, { credentials: 'include' });
   return handleResponse(response);
 };
 
-export const listUserRatings = (userId) => getUserRatings(userId);
+export const listUserRatings = (userId, params) => getUserRatings(userId, params);
 
 export const getUserRatingSummary = async (userId) => {
-  const response = await fetch(`${API_BASE_URL}/ratings/user/${userId}/summary`, { credentials: 'include' });
+  const response = await fetch(`${API_BASE_URL}/ratings/${userId}/summary`, { credentials: 'include' });
   return handleResponse(response);
 };
 
@@ -358,8 +361,8 @@ export const createRating = async (data) => {
 
 export const createUserRating = (data) => createRating(data);
 
-export const canRateUser = async (userId) => {
-  const response = await fetch(`${API_BASE_URL}/ratings/can-rate/${userId}`, { credentials: 'include' });
+export const canRateUser = async (userId, context) => {
+  const response = await fetch(`${API_BASE_URL}/ratings/can-rate/check?rateeId=${userId}&context=${context}`, { credentials: 'include' });
   return handleResponse(response);
 };
 
@@ -405,7 +408,7 @@ export const deleteNotification = async (id) => {
 export const getLeaveRequests = async (params = {}) => {
   const sp = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') sp.append(k, v); });
-  const response = await fetch(`${API_BASE_URL}/leave-requests?${sp}`, { credentials: 'include' });
+  const response = await fetch(`${API_BASE_URL}/leave-requests/my?${sp}`, { credentials: 'include' });
   return handleResponse(response);
 };
 
@@ -427,10 +430,10 @@ export const updateLeaveRequest = async (id, data) => {
   return handleResponse(response);
 };
 
-export const decideLeaveRequest = async (id, decision) => {
-  const response = await fetch(`${API_BASE_URL}/leave-requests/${id}/decide`, {
+export const decideLeaveRequest = async (id, data) => {
+  const response = await fetch(`${API_BASE_URL}/leave-requests/${id}/decision`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-    body: JSON.stringify({ decision }),
+    body: JSON.stringify(data),
   });
   return handleResponse(response);
 };

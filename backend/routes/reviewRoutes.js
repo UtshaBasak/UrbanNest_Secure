@@ -23,6 +23,11 @@ const reviewValidation = [
 // Routes
 // Eligibility check first to avoid shadowing
 router.get('/can-review/check', authenticateToken, authorize('tenant'), canReviewCheck);
+// Compatibility route for path parameter
+router.get('/can-review/:propertyId', authenticateToken, authorize('tenant'), (req, res) => {
+  req.query.propertyId = req.params.propertyId;
+  return canReviewCheck(req, res);
+});
 router.post('/', 
   authenticateToken, 
   authorize('tenant'), 

@@ -77,13 +77,14 @@ export const authorize = (...roles) => {
       return res.status(401).json({ message: 'Authentication required.' });
     }
 
-    if (!roles.includes(req.user.role)) {
-      return res.status(403).json({ 
-        message: 'Access denied. Insufficient permissions.' 
-      });
+    // Admin always authorized, or check if user role matches one of the required roles
+    if (req.user.role === 'admin' || roles.includes(req.user.role)) {
+      return next();
     }
 
-    next();
+    return res.status(403).json({ 
+      message: 'Access denied. Insufficient permissions.' 
+    });
   };
 };
 

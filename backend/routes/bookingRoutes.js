@@ -21,7 +21,7 @@ const statusUpdateValidation = [
 // Routes
 router.post('/', 
   authenticateToken, 
-  authorize('tenant'), 
+  authorize('tenant', 'owner'), 
   createBooking
 );
 

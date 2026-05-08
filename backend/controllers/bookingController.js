@@ -71,7 +71,10 @@ export const createBooking = async (req, res) => {
     const msPerDay = 1000 * 60 * 60 * 24;
     const daysRaw = Math.ceil((end - start) / msPerDay);
     const days = Math.max(daysRaw, 1);
-    const totalAmount = property.price * days;
+    
+    const propDecrypted = typeof property.getDecryptedData === 'function' ? property.getDecryptedData() : property.toJSON();
+    const propertyPrice = propDecrypted.price || 0;
+    const totalAmount = propertyPrice * days;
 
     // Check for conflicts with approved bookings
     const conflictingBookings = await Booking.find({
@@ -136,7 +139,7 @@ export const createBooking = async (req, res) => {
       await createNotification({
         user: property.owner,
         title: 'New booking request',
-        message: `${tenantDecrypted.name || 'A tenant'} requested to book ${propDecrypted.title || 'a property'} (${new Date(startDate).toLocaleDateString()} - ${new Date(endDate).toLocaleDateString()}).`,
+        message: `${tenantDecrypted.name || 'A tenant'} requested to book ${propDecrypted.title || 'a property'} (${start.toLocaleDateString()} - ${end.toLocaleDateString()}).`,
         link: `/dashboard?tab=bookings`,
         meta: { bookingId: booking._id, propertyId: property._id }
       });
@@ -151,7 +154,9 @@ export const createBooking = async (req, res) => {
 
   } catch (error) {
     console.error('Create booking error:', error);
-    res.status(500).json({ message: 'Server error while creating booking' });
+    res.status(500).json({ 
+      message: `Server error: ${error.message}`
+    });
   }
 };
 
