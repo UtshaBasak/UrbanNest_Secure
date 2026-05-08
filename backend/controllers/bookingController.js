@@ -126,16 +126,17 @@ export const createBooking = async (req, res) => {
     await booking.save();
 
     const populatedBooking = await Booking.findById(booking._id)
-      .populate('tenant', 'name email phone')
-      .populate('property', 'title location price images');
+      .populate('tenant', 'nameEncrypted emailEncrypted phoneEncrypted isEncrypted')
+      .populate('property', 'titleEncrypted locationEncrypted priceEncrypted images isEncrypted');
 
     // Notify owner about new booking request
     try {
       const tenantDecrypted = req.user.getDecryptedData();
+      const propDecrypted = typeof property.getDecryptedData === 'function' ? property.getDecryptedData() : property.toJSON();
       await createNotification({
         user: property.owner,
         title: 'New booking request',
-        message: `${tenantDecrypted.name || 'A tenant'} requested to book ${property.title} (${new Date(startDate).toLocaleDateString()} - ${new Date(endDate).toLocaleDateString()}).`,
+        message: `${tenantDecrypted.name || 'A tenant'} requested to book ${propDecrypted.title || 'a property'} (${new Date(startDate).toLocaleDateString()} - ${new Date(endDate).toLocaleDateString()}).`,
         link: `/dashboard?tab=bookings`,
         meta: { bookingId: booking._id, propertyId: property._id }
       });
@@ -173,10 +174,10 @@ export const getMyBookings = async (req, res) => {
     if (status) query.status = status;
 
     const bookings = await Booking.find(query)
-      .populate('tenant', 'name email phone')
+      .populate('tenant', 'nameEncrypted emailEncrypted phoneEncrypted isEncrypted')
       .populate({
         path: 'property',
-        select: 'title location price images owner',
+        select: 'titleEncrypted locationEncrypted priceEncrypted images owner isEncrypted',
         populate: {
           path: 'owner',
           select: 'name email _id'
@@ -287,11 +288,12 @@ export const updateBookingStatus = async (req, res) => {
 
     // Notify tenant of decision
     try {
+      const bPropDecrypted = typeof booking.property.getDecryptedData === 'function' ? booking.property.getDecryptedData() : booking.property.toJSON();
       if (status === 'approved') {
         await createNotification({
           user: booking.tenant,
           title: 'Booking approved',
-          message: `Your booking for ${booking.property.title} was approved.`,
+          message: `Your booking for ${bPropDecrypted.title || 'a property'} was approved.`,
           link: `/dashboard?tab=bookings`,
           meta: { bookingId: booking._id, propertyId: booking.property._id }
         });
@@ -299,7 +301,7 @@ export const updateBookingStatus = async (req, res) => {
         await createNotification({
           user: booking.tenant,
           title: 'Booking rejected',
-          message: `Your booking for ${booking.property.title} was rejected${rejectionReason ? `: ${rejectionReason}` : ''}.`,
+          message: `Your booking for ${bPropDecrypted.title || 'a property'} was rejected${rejectionReason ? `: ${rejectionReason}` : ''}.`,
           link: `/dashboard?tab=bookings`,
           meta: { bookingId: booking._id, propertyId: booking.property._id }
         });
@@ -309,8 +311,8 @@ export const updateBookingStatus = async (req, res) => {
     }
 
     const updatedBooking = await Booking.findById(booking._id)
-      .populate('tenant', 'name email phone')
-      .populate('property', 'title location price images');
+      .populate('tenant', 'nameEncrypted emailEncrypted phoneEncrypted isEncrypted')
+      .populate('property', 'titleEncrypted locationEncrypted priceEncrypted images isEncrypted');
 
     res.json({
       message: 'Booking status updated successfully',

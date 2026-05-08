@@ -57,8 +57,8 @@ export const createReview = async (req, res) => {
     await review.save();
 
     const populatedReview = await Review.findById(review._id)
-      .populate('tenant', 'name profileImage')
-      .populate('property', 'title');
+      .populate('tenant', 'nameEncrypted profileImage isEncrypted')
+      .populate('property', 'titleEncrypted isEncrypted');
 
     res.status(201).json({
       message: 'Review created successfully',
@@ -102,7 +102,7 @@ export const getPropertyReviews = async (req, res) => {
       property: propertyId, 
       isPublic: true 
     })
-      .populate('tenant', 'name profileImage')
+      .populate('tenant', 'nameEncrypted profileImage isEncrypted')
       .sort({ createdAt: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit);
@@ -153,7 +153,7 @@ export const getMyReviews = async (req, res) => {
     const { page = 1, limit = 10 } = req.query;
 
     const reviews = await Review.find({ tenant: req.user._id })
-      .populate('property', 'title images location')
+      .populate('property', 'titleEncrypted images locationEncrypted isEncrypted')
       .sort({ createdAt: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit);
@@ -191,8 +191,8 @@ export const getMyPropertiesReviews = async (req, res) => {
 
     // Then get all reviews for these properties
     const reviews = await Review.find({ property: { $in: propertyIds } })
-      .populate('property', 'title images location')
-      .populate('tenant', 'name email')
+      .populate('property', 'titleEncrypted images locationEncrypted isEncrypted')
+      .populate('tenant', 'nameEncrypted emailEncrypted isEncrypted')
       .sort({ createdAt: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit);
@@ -249,8 +249,8 @@ export const updateReview = async (req, res) => {
     await review.save();
 
     const updatedReview = await Review.findById(review._id)
-      .populate('tenant', 'name profileImage')
-      .populate('property', 'title');
+      .populate('tenant', 'nameEncrypted profileImage isEncrypted')
+      .populate('property', 'titleEncrypted isEncrypted');
 
     res.json({
       message: 'Review updated successfully',

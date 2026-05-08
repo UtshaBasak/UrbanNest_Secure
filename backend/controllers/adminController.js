@@ -368,13 +368,20 @@ export const getAllReviews = async (req, res) => {
     }
 
     // Get property reviews and filter by reviewer email or property title if needed
-    let propertyReviews = await mongoose.model('Review').find(propertyReviewQuery)
-      .populate('tenant', 'name email')
-      .populate('property', 'title location')
+    let propertyReviewsDocs = await mongoose.model('Review').find(propertyReviewQuery)
+      .populate('tenant', 'nameEncrypted emailEncrypted isEncrypted')
+      .populate('property', 'titleEncrypted locationEncrypted isEncrypted')
       .sort({ createdAt: -1 })
       .limit(limit * 1)
-      .skip(skip)
-      .lean();
+      .skip(skip);
+
+    let propertyReviews = propertyReviewsDocs.map(r => {
+      const rObj = r.toJSON();
+      if (r.property && typeof r.property.getDecryptedData === 'function') {
+        rObj.property = r.property.getDecryptedData();
+      }
+      return rObj;
+    });
 
     if (searchQuery) {
       propertyReviews = propertyReviews.filter(r =>

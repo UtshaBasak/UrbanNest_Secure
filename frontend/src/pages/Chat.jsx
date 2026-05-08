@@ -5,9 +5,10 @@ import {
   getMyConversations,
   getConversationMessages,
   sendChatMessage,
-  markConversationRead
+  markConversationRead,
+  deleteConversation
 } from '../utils/api';
-import { ArrowLeft, Send, MessageCircle, BookOpen, RefreshCw, Lock, X } from 'lucide-react';
+import { ArrowLeft, Send, MessageCircle, BookOpen, RefreshCw, Lock, X, Trash2 } from 'lucide-react';
 
 const Chat = () => {
   const { user } = useAuth();
@@ -124,6 +125,27 @@ const Chat = () => {
       setSendLoading(false);
     }
   };
+
+  const handleDeleteConversation = async (conversationId) => {
+    if (!window.confirm('Are you sure you want to delete this entire chat? This will remove all messages for both participants and cannot be undone.')) {
+      return;
+    }
+    try {
+      await deleteConversation(conversationId);
+      setConversations((prev) => prev.filter((c) => c._id !== conversationId));
+      if (selectedConversationId === conversationId) {
+        setSelectedConversationId(null);
+        setSelectedConversation(null);
+        setMessages([]);
+        setSearchParams({}, { replace: true });
+      }
+      alert('Conversation deleted successfully.');
+    } catch (err) {
+      console.error(err);
+      setError('Unable to delete conversation.');
+    }
+  };
+
 
   // Returns the property title to show as conversation subtitle — or null if none.
   // The caller name is already shown bold above, so we never duplicate it here.
@@ -271,14 +293,26 @@ const Chat = () => {
                       </p>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => loadMessages(selectedConversationId)}
-                    className="inline-flex items-center gap-2 rounded-full border border-neutral-200 dark:border-neutral-700 px-3 py-2 text-sm text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700"
-                  >
-                    <RefreshCw className="h-4 w-4" />
-                    Refresh
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => loadMessages(selectedConversationId)}
+                      className="inline-flex items-center gap-2 rounded-full border border-neutral-200 dark:border-neutral-700 px-3 py-2 text-sm text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 transition"
+                      title="Refresh messages"
+                    >
+                      <RefreshCw className="h-4 w-4" />
+                      Refresh
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteConversation(selectedConversationId)}
+                      className="inline-flex items-center gap-2 rounded-full border border-rose-200 dark:border-rose-800 px-3 py-2 text-sm text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/30 transition"
+                      title="Delete this chat"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Delete
+                    </button>
+                  </div>
                 </div>
 
                 <div className="flex-1 overflow-y-auto space-y-3 pr-1 mb-4">

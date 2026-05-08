@@ -534,3 +534,12 @@ export const markConversationRead = async (conversationId) => {
   });
   return handleResponse(response);
 };
+
+export const deleteConversation = async (conversationId) => {
+  const response = await fetch(`${API_BASE_URL}/chat/${conversationId}`, {
+    method: 'DELETE',
+    credentials: 'include'
+  });
+  return handleResponse(response);
+};
+

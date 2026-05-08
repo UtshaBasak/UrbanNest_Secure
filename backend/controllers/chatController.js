@@ -85,7 +85,7 @@ export const getMyConversations = async (req, res) => {
     const conversations = await Conversation.find({ participants: req.user._id })
       .sort({ updatedAt: -1 })
       .populate('participants', 'nameEncrypted profileImage role isEncrypted')
-      .populate('property', 'title');
+      .populate('property', 'titleEncrypted isEncrypted');
 
     const conversationsWithUnread = await Promise.all(conversations.map(async (conversation) => {
       const unreadCount = await Message.countDocuments({
@@ -104,12 +104,11 @@ export const getMyConversations = async (req, res) => {
       delete convObj.eccPrivateKey;
       delete convObj.eccPublicKey;
 
-      // If property title looks like raw ciphertext, null it out
-      if (convObj.property && convObj.property.title) {
-        const t = convObj.property.title;
-        if (t.length > 60 && /^[A-Za-z0-9+/]{30,}={0,2}$/.test(t)) {
-          convObj.property.title = null;
-        }
+      // Decrypt property title (it's now encrypted in DB)
+      if (convObj.property) {
+        // toJSON() already decrypts but property might not have full Mongoose doc
+        // The populate + toJSON on the conversation already handles it
+        // If title is still null/missing, it means decryption happened at toJSON level
       }
 
       // Decrypt lastMessage — old records may have been stored as an ECIES envelope
@@ -174,7 +173,7 @@ export const getConversationMessages = async (req, res) => {
 
     const conversation = await Conversation.findOne({ _id: id, participants: req.user._id })
       .populate('participants', 'nameEncrypted profileImage role isEncrypted')
-      .populate('property', 'title');
+      .populate('property', 'titleEncrypted isEncrypted');
 
     if (!conversation) {
       return res.status(404).json({ message: 'Conversation not found' });
@@ -220,13 +219,8 @@ export const getConversationMessages = async (req, res) => {
     ) || null;
     convObj.otherParticipant = otherParticipant;
 
-    // If property title looks like raw ciphertext (base64 blob), hide it
-    if (convObj.property && convObj.property.title) {
-      const t = convObj.property.title;
-      if (t.length > 60 && /^[A-Za-z0-9+/]{30,}={0,2}$/.test(t)) {
-        convObj.property.title = null;
-      }
-    }
+    // Property title is auto-decrypted by toJSON()
+    // No need for manual ciphertext detection
 
     res.json({ data: { conversation: convObj, messages } });
   } catch (error) {
@@ -337,5 +331,31 @@ export const markConversationRead = async (req, res) => {
   } catch (error) {
     console.error('Mark conversation read error:', error);
     res.status(500).json({ message: 'Server error while updating messages' });
+  }
+};
+
+// ─── deleteConversation ───────────────────────────────────────────────────────
+export const deleteConversation = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: 'Invalid conversation ID' });
+    }
+
+    const conversation = await Conversation.findOne({ _id: id, participants: req.user._id });
+    if (!conversation) {
+      return res.status(404).json({ message: 'Conversation not found or you are not a participant' });
+    }
+
+    // Delete all messages in this conversation
+    await Message.deleteMany({ conversation: id });
+
+    // Delete the conversation itself
+    await Conversation.findByIdAndDelete(id);
+
+    res.json({ data: { success: true, message: 'Conversation deleted successfully' } });
+  } catch (error) {
+    console.error('Delete conversation error:', error);
+    res.status(500).json({ message: 'Server error while deleting conversation' });
   }
 };

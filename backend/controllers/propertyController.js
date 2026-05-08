@@ -23,22 +23,13 @@ export const getSuggestedProperties = async (req, res) => {
       ...bookedPropertyIds.map(id => id.toString())
     ]));
 
-    // Find properties similar to user's activity
+    // Since type/location are now encrypted, we can't filter by them in DB queries.
+    // Instead, find recent properties that are not in the activity list.
     let suggested = [];
     if (activityPropertyIds.length > 0) {
-      // Get types and locations of activity properties
-      const activityProps = await Property.find({ _id: { $in: activityPropertyIds } });
-      const types = Array.from(new Set(activityProps.map(p => p.type).filter(Boolean)));
-      const locations = Array.from(new Set(activityProps.map(p => p.location).filter(Boolean)));
-
-      // Find properties matching type or location, not already in activity
       suggested = await Property.find({
         isActive: true,
         _id: { $nin: activityPropertyIds },
-        $or: [
-          { type: { $in: types } },
-          { location: { $in: locations } }
-        ]
       })
         .sort({ createdAt: -1 })
         .limit(8)
@@ -106,76 +97,92 @@ export const getProperties = async (req, res) => {
       radius = 10 // km
     } = req.query;
 
+    // Since property fields are now encrypted, most filters must be applied post-query.
+    // Only non-encrypted fields (isActive, availabilityStatus) can be filtered in DB.
     const query = { isActive: true };
-
-    // Price filter
-    if (minPrice || maxPrice) {
-      query.price = {};
-      if (minPrice) query.price.$gte = Number(minPrice);
-      if (maxPrice) query.price.$lte = Number(maxPrice);
-    }
-
-  // Other filters
-  if (bedrooms) query.bedrooms = Number(bedrooms);
-  if (propertyType) query.propertyType = propertyType;
-  if (req.query.type) query.type = req.query.type;
-  if (availabilityStatus) query.availabilityStatus = availabilityStatus;
-
-    // Search in title and location
-    if (search) {
-      query.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { location: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    // Location-based search
-    if (lat && lng) {
-      const radiusInRad = radius / 6371; // Earth's radius in km
-      query['coordinates.latitude'] = {
-        $gte: Number(lat) - radiusInRad,
-        $lte: Number(lat) + radiusInRad
-      };
-      query['coordinates.longitude'] = {
-        $gte: Number(lng) - radiusInRad,
-        $lte: Number(lng) + radiusInRad
-      };
-    }
+    if (availabilityStatus) query.availabilityStatus = availabilityStatus;
 
     const sortOptions = {};
-    sortOptions[sortBy] = sortOrder === 'desc' ? -1 : 1;
+    // Only sortBy createdAt / updatedAt is safe (non-encrypted). Default others to createdAt.
+    const safeSortFields = ['createdAt', 'updatedAt'];
+    const actualSortBy = safeSortFields.includes(sortBy) ? sortBy : 'createdAt';
+    sortOptions[actualSortBy] = sortOrder === 'desc' ? -1 : 1;
 
-    let properties = await Property.find(query)
+    // Fetch all matching docs, decrypt in memory, then apply filters + pagination
+    let allProperties = await Property.find(query)
       .populate('owner', 'nameEncrypted emailEncrypted phoneEncrypted profileImage isEncrypted')
-      .sort(sortOptions)
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+      .sort(sortOptions);
 
-    // Attach currentTenant if active booking exists (start<=now<end and status approved or completed)
-    // or if approved future booking exists
+    // Decrypt all properties to plain objects
+    let decryptedProperties = allProperties.map(p => p.toJSON());
+
+    // Apply post-decryption filters
+    if (minPrice || maxPrice) {
+      decryptedProperties = decryptedProperties.filter(p => {
+        if (typeof p.price !== 'number') return false;
+        if (minPrice && p.price < Number(minPrice)) return false;
+        if (maxPrice && p.price > Number(maxPrice)) return false;
+        return true;
+      });
+    }
+    if (bedrooms) {
+      decryptedProperties = decryptedProperties.filter(p => p.bedrooms === Number(bedrooms));
+    }
+    if (propertyType) {
+      decryptedProperties = decryptedProperties.filter(p => p.propertyType === propertyType);
+    }
+    if (req.query.type) {
+      decryptedProperties = decryptedProperties.filter(p => p.type === req.query.type);
+    }
+
+    // Search in decrypted title, location, description
+    if (search) {
+      const s = search.toLowerCase();
+      decryptedProperties = decryptedProperties.filter(p =>
+        (p.title && p.title.toLowerCase().includes(s)) ||
+        (p.location && p.location.toLowerCase().includes(s)) ||
+        (p.description && p.description.toLowerCase().includes(s))
+      );
+    }
+
+    // Location-based search on decrypted coordinates
+    if (lat && lng) {
+      const radiusInDeg = Number(radius) / 111; // ~111 km per degree
+      const latNum = Number(lat);
+      const lngNum = Number(lng);
+      decryptedProperties = decryptedProperties.filter(p => {
+        const pLat = p.latitude || p.coordinates?.latitude;
+        const pLng = p.longitude || p.coordinates?.longitude;
+        if (pLat == null || pLng == null) return false;
+        return Math.abs(pLat - latNum) <= radiusInDeg && Math.abs(pLng - lngNum) <= radiusInDeg;
+      });
+    }
+
+    const total = decryptedProperties.length;
+    const pageNum = Number(page);
+    const limitNum = Number(limit);
+    const paged = decryptedProperties.slice((pageNum - 1) * limitNum, pageNum * limitNum);
+
+    // Attach currentTenant if active booking exists
     const now = new Date();
-    const propIds = properties.map(p => p._id);
-    
-    // First get active bookings
+    const propIds = paged.map(p => p._id);
+
     const activeBookings = await Booking.find({
       property: { $in: propIds },
       startDate: { $lte: now },
       endDate: { $gt: now },
       status: { $in: ['approved', 'completed'] }
-    }).populate('tenant', 'name');
-    
-    // Then get approved future bookings for properties without active bookings
+    }).populate('tenant', 'nameEncrypted isEncrypted');
+
     const propsWithActive = new Set(activeBookings.map(b => b.property.toString()));
     const propsWithoutActive = propIds.filter(id => !propsWithActive.has(id.toString()));
-    
+
     const futureBookings = await Booking.find({
       property: { $in: propsWithoutActive },
       startDate: { $gt: now },
       status: 'approved'
-    }).populate('tenant', 'name');
-    
-    // Group future bookings by property and get earliest for each
+    }).populate('tenant', 'nameEncrypted isEncrypted');
+
     const futureByProp = new Map();
     futureBookings.forEach(b => {
       const propId = b.property.toString();
@@ -183,17 +190,18 @@ export const getProperties = async (req, res) => {
         futureByProp.set(propId, b);
       }
     });
-    
-    // Combine active and future bookings
+
     const allBookings = [...activeBookings, ...Array.from(futureByProp.values())];
     const byProp = new Map();
     allBookings.forEach(b => byProp.set(b.property.toString(), b));
-    
-    properties = properties.map(p => {
+
+    let properties = paged.map(p => {
       const b = byProp.get(p._id.toString());
-      const obj = p.toJSON();
-      if (b) obj.currentTenant = { id: b.tenant._id, name: b.tenant.name };
-      return obj;
+      if (b && b.tenant) {
+        const tenantDecrypted = typeof b.tenant.toJSON === 'function' ? b.tenant.toJSON() : b.tenant;
+        p.currentTenant = { id: b.tenant._id, name: tenantDecrypted.name || '[Encrypted]' };
+      }
+      return p;
     });
 
     // Add rating aggregation for all properties
@@ -210,16 +218,14 @@ export const getProperties = async (req, res) => {
       totalReviews: ratingMap.get(String(p._id))?.totalReviews || 0
     }));
 
-    const total = await Property.countDocuments(query);
-
     res.json({
       data: {
         properties,
         pagination: {
           total,
-          page: Number(page),
-          pages: Math.ceil(total / limit),
-          limit: Number(limit)
+          page: pageNum,
+          pages: Math.ceil(total / limitNum),
+          limit: limitNum
         }
       }
     });
@@ -283,7 +289,7 @@ export const getProperty = async (req, res) => {
       startDate: { $lte: now },
       endDate: { $gt: now },
       status: { $in: ['approved', 'completed'] }
-    }).populate('tenant', 'name');
+    }).populate('tenant', 'nameEncrypted isEncrypted');
 
     // If no active booking, check for approved future booking
     if (!activeBooking) {
@@ -291,12 +297,13 @@ export const getProperty = async (req, res) => {
         property: propertyDoc._id,
         startDate: { $gt: now },
         status: 'approved'
-      }).sort({ startDate: 1 }).populate('tenant', 'name');
+      }).sort({ startDate: 1 }).populate('tenant', 'nameEncrypted isEncrypted');
     }
 
     const property = propertyDoc.toJSON();
-    if (activeBooking) {
-      property.currentTenant = { id: activeBooking.tenant._id, name: activeBooking.tenant.name };
+    if (activeBooking && activeBooking.tenant) {
+      const tenantDecrypted = typeof activeBooking.tenant.toJSON === 'function' ? activeBooking.tenant.toJSON() : activeBooking.tenant;
+      property.currentTenant = { id: activeBooking.tenant._id, name: tenantDecrypted.name || '[Encrypted]' };
     }
 
     // Add rating information
@@ -339,7 +346,7 @@ export const getPropertyByPropertyId = async (req, res) => {
       startDate: { $lte: now },
       endDate: { $gt: now },
       status: { $in: ['approved', 'completed'] }
-    }).populate('tenant', 'name');
+    }).populate('tenant', 'nameEncrypted isEncrypted');
 
     // If no active booking, check for approved future booking
     if (!activeBooking) {
@@ -347,12 +354,13 @@ export const getPropertyByPropertyId = async (req, res) => {
         property: propertyDoc._id,
         startDate: { $gt: now },
         status: 'approved'
-      }).sort({ startDate: 1 }).populate('tenant', 'name');
+      }).sort({ startDate: 1 }).populate('tenant', 'nameEncrypted isEncrypted');
     }
 
     const property = propertyDoc.toJSON();
-    if (activeBooking) {
-      property.currentTenant = { id: activeBooking.tenant._id, name: activeBooking.tenant.name };
+    if (activeBooking && activeBooking.tenant) {
+      const tenantDecrypted = typeof activeBooking.tenant.toJSON === 'function' ? activeBooking.tenant.toJSON() : activeBooking.tenant;
+      property.currentTenant = { id: activeBooking.tenant._id, name: tenantDecrypted.name || '[Encrypted]' };
     }
 
     // Add rating information
@@ -451,11 +459,27 @@ export const updateProperty = async (req, res) => {
       return res.status(403).json({ message: 'Access denied' });
     }
 
-    const updatedProperty = await Property.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true, runValidators: true }
-    ).populate('owner', 'nameEncrypted emailEncrypted phoneEncrypted profileImage isEncrypted');
+    // For encrypted updates, we need to set fields on the document and save
+    // (not use findByIdAndUpdate, which bypasses pre-save hooks)
+    const updateFields = ['title', 'description', 'location', 'latitude', 'longitude',
+      'price', 'bedrooms', 'bathrooms', 'area', 'size', 'propertyType', 'type',
+      'images', 'amenities', 'availabilityStatus', 'isActive'];
+
+    updateFields.forEach(field => {
+      if (req.body[field] !== undefined) {
+        property[field] = req.body[field];
+      }
+    });
+
+    // Handle coordinates sub-object
+    if (req.body.coordinates) {
+      property.coordinates = req.body.coordinates;
+    }
+
+    await property.save();
+
+    const updatedProperty = await Property.findById(req.params.id)
+      .populate('owner', 'nameEncrypted emailEncrypted phoneEncrypted profileImage isEncrypted');
 
     res.json({
       message: 'Property updated successfully',
@@ -524,42 +548,43 @@ export const getPropertiesByOwner = async (req, res) => {
     const { ownerId } = req.params;
     const { page = 1, limit = 12 } = req.query;
 
-    const properties = await Property.find({ 
+    const allProperties = await Property.find({ 
       owner: ownerId, 
       isActive: true 
     })
       .populate('owner', 'nameEncrypted emailEncrypted phoneEncrypted profileImage isEncrypted')
-      .sort({ createdAt: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+      .sort({ createdAt: -1 });
+
+    const total = allProperties.length;
+    const pageNum = Number(page);
+    const limitNum = Number(limit);
+
+    // Decrypt and paginate
+    const decrypted = allProperties.map(p => p.toJSON());
+    const paged = decrypted.slice((pageNum - 1) * limitNum, pageNum * limitNum);
 
     // Add rating aggregation for owner's properties
-    const propertyIds = properties.map(p => p._id);
+    const propertyIds = paged.map(p => p._id);
     const reviewAggregation = await Review.aggregate([
       { $match: { property: { $in: propertyIds } } },
       { $group: { _id: '$property', averageRating: { $avg: '$rating' }, totalReviews: { $sum: 1 } } }
     ]);
 
     const ratingMap = new Map(reviewAggregation.map(r => [String(r._id), r]));
-    const propertiesWithRatings = properties.map(p => ({
-      ...p.toJSON(),
+    const propertiesWithRatings = paged.map(p => ({
+      ...p,
       averageRating: ratingMap.get(String(p._id))?.averageRating || 0,
       totalReviews: ratingMap.get(String(p._id))?.totalReviews || 0
     }));
-
-    const total = await Property.countDocuments({ 
-      owner: ownerId, 
-      isActive: true 
-    });
 
     res.json({
       data: {
         properties: propertiesWithRatings,
         pagination: {
           total,
-          page: Number(page),
-          pages: Math.ceil(total / limit),
-          limit: Number(limit)
+          page: pageNum,
+          pages: Math.ceil(total / limitNum),
+          limit: limitNum
         }
       }
     });

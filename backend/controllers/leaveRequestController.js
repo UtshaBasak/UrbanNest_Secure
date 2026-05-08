@@ -32,7 +32,7 @@ function computeEffectiveEndDate(condition, booking) {
 export const createLeaveRequest = async (req, res) => {
   try {
     const { bookingId, message = '' } = req.body;
-    const booking = await Booking.findById(bookingId).populate({ path: 'property', select: 'owner availability availabilityStatus title' });
+    const booking = await Booking.findById(bookingId).populate({ path: 'property', select: 'owner availability availabilityStatus titleEncrypted isEncrypted' });
     if (!booking) return res.status(404).json({ message: 'Booking not found' });
     if (booking.tenant.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Access denied' });
@@ -56,10 +56,11 @@ export const createLeaveRequest = async (req, res) => {
     // Notify owner
     try {
       const tenantDecrypted = req.user.getDecryptedData();
+      const propDecrypted = typeof booking.property.getDecryptedData === 'function' ? booking.property.getDecryptedData() : booking.property.toJSON();
       await createNotification({
         user: booking.property.owner,
         title: 'Leave request received',
-        message: `${tenantDecrypted.name || 'Tenant'} requested to leave early for ${booking.property.title}.`,
+        message: `${tenantDecrypted.name || 'Tenant'} requested to leave early for ${propDecrypted.title || 'a property'}.`,
         link: `/dashboard?tab=bookings`,
         meta: { bookingId: booking._id, leaveRequestId: lr._id }
       });
@@ -86,7 +87,7 @@ export const listMyLeaveRequests = async (req, res) => {
     if (status) query.status = status;
 
     const items = await LeaveRequest.find(query)
-      .populate({ path: 'booking', select: 'startDate endDate status property tenant', populate: { path: 'property', select: 'title' } })
+      .populate({ path: 'booking', select: 'startDate endDate status property tenant', populate: { path: 'property', select: 'titleEncrypted isEncrypted' } })
       .sort({ createdAt: -1 });
 
     res.json({ data: { leaveRequests: items } });
@@ -103,7 +104,7 @@ export const decideLeaveRequest = async (req, res) => {
     const { id } = req.params;
     const { decision, condition = 'end_of_month', note = '' } = req.body; // decision: 'approve' | 'reject'
 
-    const lr = await LeaveRequest.findById(id).populate({ path: 'booking', populate: { path: 'property', select: 'owner availability availabilityStatus title' } });
+    const lr = await LeaveRequest.findById(id).populate({ path: 'booking', populate: { path: 'property', select: 'owner availability availabilityStatus titleEncrypted isEncrypted' } });
     if (!lr) return res.status(404).json({ message: 'Leave request not found' });
 
     // Only owner of booking's property (or admin) can decide
