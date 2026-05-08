@@ -125,13 +125,27 @@ const Chat = () => {
     }
   };
 
+  // Returns the property title to show as conversation subtitle — or null if none.
+  // The caller name is already shown bold above, so we never duplicate it here.
   const renderConversationLabel = (conversation) => {
-    const other = conversation.otherParticipant || {};
-    return conversation.property?.title || other.name || 'Conversation';
+    const title = conversation.property?.title;
+    if (title && !looksEncrypted(title)) return title;
+    return null; // nothing meaningful to show as subtitle
+  };
+
+  // Detect raw ECIES / RSA-hybrid ciphertext that must never be shown to users
+  const looksEncrypted = (str) => {
+    if (!str) return false;
+    // ECIES envelope stored as JSON object string
+    if (str.startsWith('{') && str.includes('ephemeralPublicKey')) return true;
+    // RSA-AES hybrid stored as base64 (long, no spaces)
+    if (str.length > 60 && /^[A-Za-z0-9+/]{30,}={0,2}$/.test(str)) return true;
+    return false;
   };
 
   const formatPreview = (lastMessage) => {
     if (!lastMessage) return 'No messages yet';
+    if (looksEncrypted(lastMessage)) return '🔒 Encrypted message';
     return lastMessage;
   };
 
@@ -218,9 +232,11 @@ const Chat = () => {
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="font-semibold">{other.name || 'Unknown user'}</p>
-                          <p className={`text-sm mt-1 ${active ? 'text-cyan-100' : 'text-neutral-500 dark:text-neutral-400'}`}>
-                            {renderConversationLabel(conversation)}
-                          </p>
+                          {renderConversationLabel(conversation) && (
+                            <p className={`text-sm mt-1 ${active ? 'text-cyan-100' : 'text-neutral-500 dark:text-neutral-400'}`}>
+                              {renderConversationLabel(conversation)}
+                            </p>
+                          )}
                         </div>
                         {conversation.unreadCount > 0 && (
                           <span className="rounded-full bg-rose-500 px-2 py-0.5 text-[11px] font-semibold text-white">
@@ -248,7 +264,7 @@ const Chat = () => {
                     <h2 className="text-xl font-semibold text-neutral-900 dark:text-white">
                       {selectedConversation.otherParticipant?.name || 'Conversation'}
                     </h2>
-                    {selectedConversation.property?.title && (
+                    {selectedConversation.property?.title && !looksEncrypted(selectedConversation.property.title) && (
                       <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1 flex items-center gap-2">
                         <BookOpen className="h-4 w-4" />
                         {selectedConversation.property.title}
