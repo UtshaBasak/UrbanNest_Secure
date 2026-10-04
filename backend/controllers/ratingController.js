@@ -11,10 +11,10 @@ async function canRate(raterId, rateeId, context) {
   if (!raterId || !isValidId(String(rateeId)) || raterId.toString() === rateeId.toString()) return false;
   const ownerId = context === 'owner' ? rateeId : raterId;
   const tenantId = context === 'tenant' ? rateeId : raterId;
-  const ownerProperties = await Property.find({ owner: ownerId }).distinct('_id');
+  const ownerProperties = await Property.find({ owner: { $eq: ownerId } }).distinct('_id');
   if (!ownerProperties.length) return false;
   const booking = await Booking.exists({
-    tenant: tenantId,
+    tenant: { $eq: tenantId },
     property: { $in: ownerProperties },
     status: { $in: ['approved', 'completed'] }
   });
@@ -50,9 +50,10 @@ export const createRating = async (req, res) => {
     if (!ok) return res.status(403).json({ message: 'Not allowed to rate this user' });
 
     // Create or update existing rating by this rater for this ratee/context
-    const existing = await UserRating.exists({ ratee: rateeId, rater: raterId, context });
+    const ratingFilter = { ratee: { $eq: rateeId }, rater: raterId, context: { $eq: context } };
+    const existing = await UserRating.exists(ratingFilter);
     const updated = await UserRating.findOneAndUpdate(
-      { ratee: rateeId, rater: raterId, context },
+      ratingFilter,
       { $set: { rating: ratingValue, comment: comment.trim() } },
       { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true, runValidators: true }
     );

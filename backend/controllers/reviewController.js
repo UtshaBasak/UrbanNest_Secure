@@ -7,8 +7,8 @@ import { isValidId, parsePagination } from '../utils/validation.js';
 
 // A tenant can review once their stay has started (approved or completed)
 const reviewableBookingFilter = (tenantId, propertyId) => ({
-  tenant: tenantId,
-  property: propertyId,
+  tenant: { $eq: tenantId },
+  property: { $eq: propertyId },
   status: { $in: ['approved', 'completed'] },
   startDate: { $lte: new Date() }
 });
@@ -20,16 +20,16 @@ export const createReview = async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ 
-        message: 'Validation failed', 
-        errors: errors.array() 
+      return res.status(400).json({
+        message: 'Validation failed',
+        errors: errors.array()
       });
     }
 
     const { property: propertyId, rating, comment } = req.body;
 
     // Check if property exists
-    const property = await Property.findById(propertyId);
+    const property = await Property.findOne({ _id: { $eq: propertyId } });
     if (!property) {
       return res.status(404).json({ message: 'Property not found' });
     }
@@ -38,15 +38,15 @@ export const createReview = async (req, res) => {
     const hasBooking = await Booking.exists(reviewableBookingFilter(req.user._id, propertyId));
 
     if (!hasBooking) {
-      return res.status(400).json({ 
-        message: 'You can only review properties you have booked and have been approved for' 
+      return res.status(400).json({
+        message: 'You can only review properties you have booked and have been approved for'
       });
     }
 
     // Check if user already reviewed this property
     const existingReview = await Review.findOne({
       tenant: req.user._id,
-      property: propertyId
+      property: { $eq: propertyId }
     });
 
     if (existingReview) {
@@ -86,7 +86,7 @@ export const canReviewCheck = async (req, res) => {
     const propertyId = req.params.propertyId || req.query.propertyId;
     if (!isValidId(propertyId)) return res.status(400).json({ message: 'Valid propertyId is required' });
     const hasBooking = await Booking.exists(reviewableBookingFilter(req.user._id, propertyId));
-    const alreadyReviewed = !!(await Review.exists({ tenant: req.user._id, property: propertyId }));
+    const alreadyReviewed = !!(await Review.exists({ tenant: req.user._id, property: { $eq: propertyId } }));
     return res.json({ data: { canReview: !!hasBooking && !alreadyReviewed, alreadyReviewed } });
   } catch (error) {
     console.error('canReviewCheck error:', error);
@@ -103,18 +103,18 @@ export const getPropertyReviews = async (req, res) => {
     const { page, limit, skip } = parsePagination(req.query);
     if (!isValidId(propertyId)) return res.status(400).json({ message: 'Invalid property id' });
 
-    const reviews = await Review.find({ 
-      property: propertyId, 
-      isPublic: true 
+    const reviews = await Review.find({
+      property: propertyId,
+      isPublic: true
     })
       .populate('tenant', 'nameEncrypted profileImage isEncrypted')
       .sort({ createdAt: -1 })
       .limit(limit)
       .skip(skip);
 
-    const total = await Review.countDocuments({ 
-      property: propertyId, 
-      isPublic: true 
+    const total = await Review.countDocuments({
+      property: propertyId,
+      isPublic: true
     });
 
     // Calculate average rating
@@ -231,9 +231,9 @@ export const updateReview = async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ 
-        message: 'Validation failed', 
-        errors: errors.array() 
+      return res.status(400).json({
+        message: 'Validation failed',
+        errors: errors.array()
       });
     }
 
@@ -249,7 +249,7 @@ export const updateReview = async (req, res) => {
     }
 
     const { rating, comment } = req.body;
-    
+
     review.rating = rating;
     review.comment = comment;
     await review.save();
@@ -281,7 +281,7 @@ export const deleteReview = async (req, res) => {
     }
 
     // Check if user owns the review or is admin
-    if (req.user.role !== 'admin' && 
+    if (req.user.role !== 'admin' &&
         review.tenant.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Access denied' });
     }

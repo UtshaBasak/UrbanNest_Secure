@@ -15,7 +15,7 @@ const hashOtp = (otp, emailFingerprint, purpose) => sha512Hex(`${purpose}|${emai
  */
 export async function issueOtp({ emailFingerprint, purpose, userId = null }) {
   const otp = generateOtp();
-  await Otp.deleteMany({ emailFingerprint, purpose });
+  await Otp.deleteMany({ emailFingerprint: { $eq: emailFingerprint }, purpose: { $eq: purpose } });
   await Otp.create({ emailFingerprint, purpose, userId, otp: hashOtp(otp, emailFingerprint, purpose) });
   return otp;
 }
@@ -26,8 +26,8 @@ export async function issueOtp({ emailFingerprint, purpose, userId = null }) {
  * so a 6-digit code cannot be brute-forced. A successful check consumes it.
  */
 export async function consumeOtp({ emailFingerprint, purpose, otp, userId }) {
-  const filter = { emailFingerprint, purpose };
-  if (userId) filter.userId = userId;
+  const filter = { emailFingerprint: { $eq: emailFingerprint }, purpose: { $eq: purpose } };
+  if (userId) filter.userId = { $eq: userId };
   const record = await Otp.findOne(filter);
   if (!record) return { ok: false, message: 'No verification code found. Please request a new one.' };
   if (record.expiresAt < new Date()) {

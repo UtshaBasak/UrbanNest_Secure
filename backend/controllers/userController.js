@@ -13,7 +13,7 @@ import { sendOtpEmail } from '../config/emailService.js';
 import { fingerprint } from '../crypto/rsa.js';
 import { getPublicKey } from '../crypto/keyManager.js';
 import { issueOtp, consumeOtp } from '../utils/otp.js';
-import { isValidId, parsePagination, asString } from '../utils/validation.js';
+import { isValidId, parsePagination, asString, isEmailLike } from '../utils/validation.js';
 
 // Fields anyone may see on another user's profile
 const PUBLIC_USER_FIELDS = ['_id', 'name', 'role', 'profileImage', 'isActive', 'createdAt'];
@@ -48,7 +48,7 @@ export const changeEmail = async (req, res) => {
   try {
     const { password, newEmail } = req.body;
     if (!password || !newEmail) return res.status(400).json({ message: 'Password and new email are required' });
-    if (!/^\S+@\S+\.\S+$/.test(newEmail)) return res.status(400).json({ message: 'Invalid email format' });
+    if (!isEmailLike(newEmail)) return res.status(400).json({ message: 'Invalid email format' });
     const user = await User.findById(req.user._id).select('+password +passwordSalt');
     if (!user) return res.status(404).json({ message: 'User not found' });
     const valid = await user.comparePassword(password);

@@ -108,7 +108,7 @@ export const sendOtp = async (req, res) => {
     // Rate limit: max 1 OTP per email+purpose per 60s
     const pubKey = getPublicKey('user-data');
     const fpRecent = fingerprint(email.toLowerCase(), pubKey);
-    const recent = await Otp.findOne({ emailFingerprint: fpRecent, purpose, createdAt: { $gt: new Date(Date.now() - 60000) } });
+    const recent = await Otp.findOne({ emailFingerprint: { $eq: fpRecent }, purpose: { $eq: purpose }, createdAt: { $gt: new Date(Date.now() - 60000) } });
     if (recent) return res.status(429).json({ message: 'Please wait before requesting another code' });
 
     const otp = await issueOtp({ emailFingerprint: fpRecent, purpose });
@@ -339,7 +339,7 @@ export const verify2FA = async (req, res) => {
 
     if (decoded.purpose !== '2fa-pending') return res.status(400).json({ message: 'Invalid token' });
 
-    const user = await User.findById(decoded.userId);
+    const user = await User.findOne({ _id: { $eq: String(decoded.userId) } });
     if (!user || !user.isActive) return res.status(404).json({ message: 'User not found' });
 
     // email is not in plaintext in DB — decrypt it to locate the OTP record

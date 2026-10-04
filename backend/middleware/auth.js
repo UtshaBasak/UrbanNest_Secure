@@ -63,7 +63,7 @@ export const authenticateToken = async (req, res, next) => {
       }
     }
 
-    const user = await User.findById(decoded.userId).select('-password');
+    const user = await User.findOne({ _id: { $eq: String(decoded.userId) } }).select('-password');
 
     if (!user || !user.isActive) {
       return res.status(401).json({ message: 'Invalid token or user not found.' });
@@ -98,7 +98,7 @@ export const optionalAuth = async (req, res, next) => {
     const decoded = verifySessionToken(token, 'session');
     if (decoded.purpose || !decoded.userId) return next();
     if (decoded.ip && decoded.ip !== (req.ip || '') && process.env.NODE_ENV === 'production') return next();
-    const user = await User.findById(decoded.userId).select('-password');
+    const user = await User.findOne({ _id: { $eq: String(decoded.userId) } }).select('-password');
     if (user && user.isActive && !isIssuedBeforePasswordChange(decoded, user)) {
       req.user = user;
       req.tokenData = decoded;
@@ -121,8 +121,8 @@ export const authorize = (...roles) => {
       return next();
     }
 
-    return res.status(403).json({ 
-      message: 'Access denied. Insufficient permissions.' 
+    return res.status(403).json({
+      message: 'Access denied. Insufficient permissions.'
     });
   };
 };
@@ -146,8 +146,8 @@ export const checkOwnership = (Model, paramName = 'id') => {
       // Check if user owns the resource
       const ownerId = resource.owner || resource.user || resource._id;
       if (ownerId.toString() !== req.user._id.toString()) {
-        return res.status(403).json({ 
-          message: 'Access denied. You can only access your own resources.' 
+        return res.status(403).json({
+          message: 'Access denied. You can only access your own resources.'
         });
       }
 

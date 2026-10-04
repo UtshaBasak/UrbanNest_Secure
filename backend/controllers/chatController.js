@@ -72,7 +72,7 @@ export const createConversation = async (req, res) => {
 
     let property = null;
     if (propertyId) {
-      property = await Property.findById(propertyId).select('_id owner');
+      property = await Property.findOne({ _id: { $eq: propertyId } }).select('_id owner');
       if (!property) {
         return res.status(404).json({ message: 'Property not found' });
       }
@@ -86,9 +86,10 @@ export const createConversation = async (req, res) => {
       return res.status(404).json({ message: 'One or more participants could not be found' });
     }
 
+    // Both users must be participants (equality on an array field = "contains")
     const existingConversation = await Conversation.findOne({
-      participants: { $all: normalizedParticipantIds },
-      property: propertyId || null
+      $and: normalizedParticipantIds.map((pid) => ({ participants: { $eq: pid } })),
+      property: { $eq: propertyId || null }
     });
 
     if (existingConversation) {

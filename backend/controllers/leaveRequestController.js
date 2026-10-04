@@ -40,7 +40,7 @@ export const createLeaveRequest = async (req, res) => {
     if (typeof message !== 'string' || message.length > 1000) {
       return res.status(400).json({ message: 'Message must be at most 1000 characters' });
     }
-    const booking = await Booking.findById(bookingId).populate({ path: 'property', select: 'owner availability availabilityStatus titleEncrypted isEncrypted' });
+    const booking = await Booking.findOne({ _id: { $eq: bookingId } }).populate({ path: 'property', select: 'owner availability availabilityStatus titleEncrypted isEncrypted' });
     if (!booking || !booking.property) return res.status(404).json({ message: 'Booking not found' });
     if (booking.tenant.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Access denied' });
@@ -74,7 +74,7 @@ export const createLeaveRequest = async (req, res) => {
       });
     } catch (e) {
       // log only
-       
+
       console.error('Failed to create notification (createLeaveRequest):', e.message);
     }
 
@@ -92,7 +92,7 @@ export const listMyLeaveRequests = async (req, res) => {
     if (req.user.role === 'tenant') query.tenant = req.user._id;
     if (req.user.role === 'owner') query.owner = req.user._id;
     const { status } = req.query;
-    if (status) query.status = status;
+    if (typeof status === 'string' && status) query.status = { $eq: status };
 
     const items = await LeaveRequest.find(query)
       .populate({ path: 'booking', select: 'startDate endDate status property tenant', populate: { path: 'property', select: 'titleEncrypted isEncrypted' } })
@@ -100,7 +100,7 @@ export const listMyLeaveRequests = async (req, res) => {
 
     res.json({ data: { leaveRequests: items } });
   } catch (error) {
-     
+
     console.error('listMyLeaveRequests error:', error);
     res.status(500).json({ message: 'Server error while listing leave requests' });
   }
@@ -190,7 +190,7 @@ export const decideLeaveRequest = async (req, res) => {
 
     res.json({ message: 'Request approved', data: { leaveRequest: lr } });
   } catch (error) {
-     
+
     console.error('decideLeaveRequest error:', error);
     res.status(500).json({ message: 'Server error while deciding leave request' });
   }

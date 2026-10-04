@@ -33,3 +33,17 @@ export const parsePagination = (query, { defaultLimit = 10, maxLimit = 100 } = {
 
 /** Returns the value only if it is a string (query params can arrive as arrays). */
 export const asString = (value, fallback = '') => (typeof value === 'string' ? value : fallback);
+
+/**
+ * Linear-time email shape check (local@domain.tld, no whitespace).
+ * Avoids backtracking regexes such as /^\S+@\S+\.\S+$/, which are slow on
+ * crafted input.
+ */
+export const isEmailLike = (value) => {
+  if (typeof value !== 'string' || value.length > 254 || /\s/.test(value)) return false;
+  const at = value.indexOf('@');
+  if (at < 1 || at !== value.lastIndexOf('@')) return false;
+  const domain = value.slice(at + 1);
+  const dot = domain.lastIndexOf('.');
+  return dot > 0 && dot < domain.length - 1;
+};

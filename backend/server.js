@@ -8,6 +8,7 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import morgan from 'morgan';
 import { authLimiter, apiLimiter } from './middleware/rateLimit.js';
+import { csrfProtection, csrfTokenHandler } from './middleware/csrf.js';
 
 // Import routes
 import authRoutes from './routes/authRoutes.js';
@@ -34,8 +35,25 @@ const startServer = async () => {
 const app = express();
 
 // Security middleware
+// The CSP allows only our own scripts and API. Images may be listing URLs or
+// uploaded data URIs; React sets inline style attributes, so styles need
+// 'unsafe-inline'.
 app.use(helmet({
-  contentSecurityPolicy: false
+  contentSecurityPolicy: {
+    useDefaults: true,
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
+      connectSrc: ["'self'"],
+      fontSrc: ["'self'", 'data:'],
+      objectSrc: ["'none'"],
+      frameAncestors: ["'none'"],
+      baseUri: ["'self'"],
+      formAction: ["'self'"]
+    }
+  }
 }));
 
 // Behind a reverse proxy (e.g. Render) use the client IP from X-Forwarded-For,
@@ -71,13 +89,16 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-XSRF-TOKEN']
 }));
 
 // Body parsing middleware
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+// Every state-changing API request must carry the CSRF token (see middleware/csrf.js)
+app.use('/api', csrfProtection);
+app.get('/api/csrf-token', csrfTokenHandler);
 // Express 5 leaves req.body undefined when no body was parsed; controllers
 // destructure it, so keep the Express 4 behaviour of an empty object.
 app.use((req, res, next) => {

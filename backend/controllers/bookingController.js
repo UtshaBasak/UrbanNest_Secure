@@ -42,9 +42,9 @@ export const createBooking = async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ 
-        message: 'Validation failed', 
-        errors: errors.array() 
+      return res.status(400).json({
+        message: 'Validation failed',
+        errors: errors.array()
       });
     }
 
@@ -54,7 +54,7 @@ export const createBooking = async (req, res) => {
     }
 
     // Check if property exists and is available
-    const property = await Property.findById(propertyId);
+    const property = await Property.findOne({ _id: { $eq: propertyId } });
     if (!property || property.isActive === false) {
       return res.status(404).json({ message: 'Property not found' });
     }
@@ -69,7 +69,7 @@ export const createBooking = async (req, res) => {
     }
 
     // Only one open request per tenant per property
-    const existingRequest = await Booking.exists({ tenant: req.user._id, property: propertyId, status: 'pending' });
+    const existingRequest = await Booking.exists({ tenant: req.user._id, property: { $eq: propertyId }, status: 'pending' });
     if (existingRequest) {
       return res.status(400).json({ message: 'You already have a pending booking request for this property' });
     }
@@ -85,14 +85,14 @@ export const createBooking = async (req, res) => {
     const msPerDay = 1000 * 60 * 60 * 24;
     const daysRaw = Math.ceil((end - start) / msPerDay);
     const days = Math.max(daysRaw, 1);
-    
+
     const propDecrypted = typeof property.getDecryptedData === 'function' ? property.getDecryptedData() : property.toJSON();
     const propertyPrice = propDecrypted.price || 0;
     const totalAmount = propertyPrice * days;
 
     // Check for conflicts with approved bookings
     const conflictingBookings = await Booking.find({
-      property: propertyId,
+      property: { $eq: propertyId },
       status: 'approved',
       $or: [
         // Case 1: Existing booking starts during new booking period
@@ -117,11 +117,11 @@ export const createBooking = async (req, res) => {
     });
 
     if (conflictingBookings.length > 0) {
-      const conflictDates = conflictingBookings.map(cb => 
+      const conflictDates = conflictingBookings.map(cb =>
         `${new Date(cb.startDate).toLocaleDateString()} - ${new Date(cb.endDate).toLocaleDateString()}`
       ).join(', ');
-      
-      return res.status(400).json({ 
+
+      return res.status(400).json({
         message: `Cannot create booking request due to conflicts with approved bookings: ${conflictDates}`,
         conflictingBookings: conflictingBookings.map(cb => ({
           id: cb._id,
@@ -133,7 +133,7 @@ export const createBooking = async (req, res) => {
 
     const booking = new Booking({
       tenant: req.user._id,
-      property: propertyId,
+      property: property._id,
       startDate: start,
       endDate: end,
       totalAmount,
@@ -293,11 +293,11 @@ export const updateBookingStatus = async (req, res) => {
       });
 
       if (conflictingBookings.length > 0) {
-        const conflictDates = conflictingBookings.map(cb => 
+        const conflictDates = conflictingBookings.map(cb =>
           `${new Date(cb.startDate).toLocaleDateString()} - ${new Date(cb.endDate).toLocaleDateString()}`
         ).join(', ');
-        
-        return res.status(400).json({ 
+
+        return res.status(400).json({
           message: `Cannot approve booking due to date conflicts with existing approved bookings: ${conflictDates}`,
           conflictingBookings: conflictingBookings.map(cb => ({
             id: cb._id,

@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { encrypt, decrypt, fingerprint } from '../crypto/rsa.js';
 import { getPublicKey, getPrivateKey } from '../crypto/keyManager.js';
 import { sha512Hex, generateSalt } from '../crypto/sha512.js';
+import { isEmailLike } from '../utils/validation.js';
 
 const userSchema = new mongoose.Schema({
   // ── Plaintext PII fields ──────────────────────────────────────────────────
@@ -17,7 +18,7 @@ const userSchema = new mongoose.Schema({
   email: {
     type: String,
     lowercase: true,
-    match: [/^\S+@\S+\.\S+$/, 'Please enter a valid email'],
+    validate: { validator: (v) => !v || isEmailLike(v), message: 'Please enter a valid email' },
     select: false   // never returned from DB queries; lookup via emailFingerprint
   },
   phone: {
