@@ -20,18 +20,23 @@ const OwnerProperties = () => {
   const [error, setError] = useState('');
 
   useEffect(() => {
+    // Reset when the owner id changes and ignore responses for a previous id
+    let cancelled = false;
     const load = async () => {
       try {
         setLoading(true);
+        setError('');
+        setProperties([]);
         const res = await getPropertiesByOwner(id);
-        setProperties(res.data.properties || []);
+        if (!cancelled) setProperties(res.data.properties || []);
       } catch (e) {
-        setError('Failed to fetch properties');
+        if (!cancelled) setError('Failed to fetch properties');
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
     if (id) load();
+    return () => { cancelled = true; };
   }, [id]);
 
   return (
@@ -48,7 +53,7 @@ const OwnerProperties = () => {
             {properties.map((property) => (
               <Link key={property._id} to={`/properties/${property._id}`} className="bg-white dark:bg-neutral-800 rounded-lg shadow-sm overflow-hidden hover:shadow-lg transition-shadow">
                 <div className="relative">
-                  <img src={property.images?.[0] || '/api/placeholder/400/300'} alt={property.title} className="w-full h-48 object-cover" />
+                  <img src={property.images?.[0] || '/placeholder.svg'} alt={property.title} className="w-full h-48 object-cover" onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/placeholder.svg'; }} />
                   <span className={`absolute top-2 left-2 px-2 py-1 text-xs font-medium rounded-full shadow-sm ${badge(property.availabilityStatus || property.availability)}`}>
                     {property.availabilityStatus || property.availability}
                   </span>
@@ -87,12 +92,12 @@ const OwnerProperties = () => {
                   </div>
                   <div className="flex items-center justify-between">
                     <div className="text-2xl font-bold text-cyan-600 dark:text-cyan-400">
-                      ${property.price?.toLocaleString()}<span className="text-sm font-normal text-neutral-500 dark:text-neutral-400">/month</span>
+                      ৳{property.price?.toLocaleString()}<span className="text-sm font-normal text-neutral-500 dark:text-neutral-400">/month</span>
                     </div>
-                    {property.rating && (
+                    {property.averageRating > 0 && (
                       <div className="flex items-center">
                         <Star className="h-4 w-4 text-yellow-400 fill-current" />
-                        <span className="ml-1 text-sm text-neutral-600 dark:text-neutral-400">{property.rating.toFixed(1)}</span>
+                        <span className="ml-1 text-sm text-neutral-600 dark:text-neutral-400">{Number(property.averageRating).toFixed(1)}</span>
                       </div>
                     )}
                   </div>

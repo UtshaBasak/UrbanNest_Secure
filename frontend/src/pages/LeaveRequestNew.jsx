@@ -18,7 +18,7 @@ const LeaveRequestNew = () => {
     const load = async () => {
       try {
         setLoading(true);
-        const res = await getMyBookings();
+        const res = await getMyBookings({ status: 'approved', limit: 100 });
         setBookings(res?.data?.bookings || []);
       } catch (e) {
         console.error('Failed to load bookings', e);
@@ -103,8 +103,10 @@ const LeaveRequestNew = () => {
                 rows={4}
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
+                maxLength={1000}
                 placeholder="Explain why you need to leave early..."
               />
+              <p className="text-xs text-neutral-500 mt-1 text-right">{message.length}/1000</p>
             </div>
             <div className="flex items-center gap-3">
               <button

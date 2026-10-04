@@ -44,17 +44,17 @@ const Home = () => {
             try {
               const res = await getProperty(pid);
               return { pid, property: res.data?.property || null };
-            } catch {
-              // Property not found (deleted) — return null marker
-              return { pid, property: null };
+            } catch (err) {
+              // Only a 404 means the property was deleted; keep the id on other errors
+              return { pid, property: null, missing: err?.status === 404 };
             }
           })
         );
 
         // Filter out deleted properties and clean stale IDs from localStorage
-        const validIds = results.filter(r => r.property).map(r => r.pid);
-        if (validIds.length !== arr.length) {
-          localStorage.setItem(key, JSON.stringify(validIds));
+        const keptIds = results.filter(r => !r.missing).map(r => r.pid);
+        if (keptIds.length !== arr.length) {
+          localStorage.setItem(key, JSON.stringify(keptIds));
         }
         setRecentlyViewed(results.map(r => r.property).filter(Boolean));
       } catch {
@@ -188,7 +188,8 @@ const Home = () => {
         </div>
       </section>
 
-      {/* Featured Properties */}
+      {/* Featured Properties (hidden when there is nothing to show) */}
+      {(loading || featuredProperties.length > 0) && (
       <section className="py-20 px-4">
         <div className="container mx-auto max-w-6xl">
           <div className="text-center mb-12">
@@ -224,9 +225,10 @@ const Home = () => {
                 >
                   <div className="relative overflow-hidden rounded-t-xl">
                     <img
-                      src={property.images?.[0] || '/api/placeholder/400/300'}
+                      src={property.images?.[0] || '/placeholder.svg'}
                       alt={property.title}
                       className="w-full h-48 object-cover group-hover:scale-110 transition-transform duration-300"
+                      onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/placeholder.svg'; }}
                     />
                     <div className="absolute top-4 left-4">
                       {(() => {
@@ -308,6 +310,7 @@ const Home = () => {
           {/* Removed 'View All Properties' button as requested */}
         </div>
       </section>
+      )}
 
       {/* Latest Properties Section */}
       <section className="py-20 px-4">
@@ -342,9 +345,10 @@ const Home = () => {
                 >
                   <div className="relative overflow-hidden rounded-t-xl">
                     <img
-                      src={property.images?.[0] || '/api/placeholder/400/300'}
+                      src={property.images?.[0] || '/placeholder.svg'}
                       alt={property.title}
                       className="w-full h-48 object-cover group-hover:scale-110 transition-transform duration-300"
+                      onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/placeholder.svg'; }}
                     />
                     <div className="absolute top-4 left-4">
                       {(() => {
@@ -457,9 +461,10 @@ const Home = () => {
                 >
                   <div className="relative overflow-hidden rounded-t-xl">
                     <img
-                      src={property.images?.[0] || '/api/placeholder/400/300'}
+                      src={property.images?.[0] || '/placeholder.svg'}
                       alt={property.title}
                       className="w-full h-48 object-cover group-hover:scale-110 transition-transform duration-300"
+                      onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/placeholder.svg'; }}
                     />
                     <div className="absolute top-4 left-4">
                       {(() => {

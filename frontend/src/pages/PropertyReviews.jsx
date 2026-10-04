@@ -20,18 +20,22 @@ const PropertyReviews = () => {
           getProperty(id),
           getPropertyReviews(id, { limit: 100 }),
         ]);
-        setProperty(pRes.data.property || null);
-        const reviewsData = rRes.data.reviews || [];
+        setProperty(pRes?.data?.property || null);
+        const reviewsData = rRes?.data?.reviews || [];
         setReviews(reviewsData);
-        
-        // Calculate accurate average rating from all reviews
-        const totalRating = reviewsData.reduce((sum, review) => sum + review.rating, 0);
-        const averageRating = reviewsData.length > 0 ? totalRating / reviewsData.length : 0;
-        
-        setStats({ 
-          averageRating: averageRating, 
-          totalReviews: reviewsData.length 
-        });
+
+        // Prefer server-computed stats (covers all reviews, not just this page)
+        const serverStats = rRes?.data?.stats;
+        const serverAvg = Number(serverStats?.averageRating);
+        const serverTotal = Number(serverStats?.totalReviews);
+        if (serverStats && Number.isFinite(serverAvg) && Number.isFinite(serverTotal)) {
+          setStats({ averageRating: serverAvg, totalReviews: serverTotal });
+        } else {
+          // Fallback: compute from the reviews we received
+          const totalRating = reviewsData.reduce((sum, review) => sum + (Number(review.rating) || 0), 0);
+          const averageRating = reviewsData.length > 0 ? totalRating / reviewsData.length : 0;
+          setStats({ averageRating, totalReviews: reviewsData.length });
+        }
       } catch (e) {
         setError('Failed to load reviews');
       } finally {

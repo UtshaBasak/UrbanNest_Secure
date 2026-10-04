@@ -48,6 +48,10 @@ bookingSchema.pre('validate', function () {
     throw new Error('End date must be after start date');
   }
 
+  // The past-date rule only applies when the start date is being set; later
+  // saves (approve, cancel, leave requests) happen after the stay has begun.
+  if (!this.isNew && !this.isModified('startDate')) return;
+
   // Allow same-day bookings by comparing date-only (truncate time)
   const startDay = new Date(this.startDate);
   startDay.setHours(0, 0, 0, 0);

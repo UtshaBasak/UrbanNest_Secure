@@ -1,5 +1,6 @@
 import express from 'express';
 import { authenticateToken, authorize } from '../middleware/auth.js';
+import { validateIds } from '../utils/validation.js';
 import { createLeaveRequest, listMyLeaveRequests, decideLeaveRequest } from '../controllers/leaveRequestController.js';
 
 const router = express.Router();
@@ -11,6 +12,6 @@ router.post('/', authenticateToken, authorize('tenant'), createLeaveRequest);
 router.get('/my', authenticateToken, authorize('tenant', 'owner', 'admin'), listMyLeaveRequests);
 
 // Owner/Admin decides on a leave request
-router.put('/:id/decision', authenticateToken, authorize('owner', 'admin'), decideLeaveRequest);
+router.put('/:id/decision', authenticateToken, validateIds('id'), authorize('owner', 'admin'), decideLeaveRequest);
 
 export default router;

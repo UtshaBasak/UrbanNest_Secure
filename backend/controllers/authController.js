@@ -1,6 +1,7 @@
 import { generateSessionToken, verifySessionToken } from '../crypto/sessionToken.js';
 import { validationResult } from 'express-validator';
 import mongoose from 'mongoose';
+import { invalidatePropertyCache } from '../utils/propertyCache.js';
 import User from '../models/User.js';
 import Property from '../models/Property.js';
 import Booking from '../models/Booking.js';
@@ -14,7 +15,8 @@ import { hashToken } from '../middleware/auth.js';
 import { sendOtpEmail } from '../config/emailService.js';
 import { fingerprint, encrypt, decrypt } from '../crypto/rsa.js';
 import { getPublicKey } from '../crypto/keyManager.js';
-import e from 'express';
+import { randomString } from '../crypto/random.js';
+import { issueOtp, consumeOtp } from '../utils/otp.js';
 
 // ─── Token helpers ───────────────────────────────────────────────────────────
 
@@ -24,14 +26,10 @@ const generateAccessToken = (userId, ip, userAgent) => {
 
 const generateRefreshTokenString = () => {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let result = '';
-  for (let i = 0; i < 64; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return result + '_' + Date.now().toString(36);
+  return randomString(64, chars) + '_' + Date.now().toString(36);
 };
 
-const setAuthCookies = async (res, userId, ip, userAgent) => {
+export const setAuthCookies = async (res, userId, ip, userAgent) => {
   const accessToken = generateAccessToken(userId, ip, userAgent);
   const refreshPlain = generateRefreshTokenString();
   // Encrypt refresh token before storing and issuing to client
@@ -62,20 +60,6 @@ const clearAuthCookies = (res) => {
   res.clearCookie('refreshToken', opts);
   res.clearCookie('token', opts);
 };
-
-// ─── OTP helpers ─────────────────────────────────────────────────────────────
-
-function generateOtp() {
-  let otp = '';
-  for (let i = 0; i < 6; i++) otp += Math.floor(Math.random() * 10).toString();
-  return otp;
-}
-
-function simpleHashOtp(otp) {
-  let h = 0n;
-  for (let i = 0; i < otp.length; i++) h = (h * 31n + BigInt(otp.charCodeAt(i))) % (2n ** 64n);
-  return h.toString(16);
-}
 
 // ─── Password policy ─────────────────────────────────────────────────────────
 
@@ -116,7 +100,9 @@ export const sendOtp = async (req, res) => {
   try {
     const { email, purpose } = req.body;
     if (!email || !purpose) return res.status(400).json({ message: 'Email and purpose are required' });
-    const validPurposes = ['signup', 'forgot-password', 'email-change', '2fa-login'];
+    // Other purposes have dedicated flows that verify the account first
+    // (forgot-password, change-email, login), so only sign-up codes are issued here
+    const validPurposes = ['signup'];
     if (!validPurposes.includes(purpose)) return res.status(400).json({ message: 'Invalid purpose' });
 
     // Rate limit: max 1 OTP per email+purpose per 60s
@@ -125,11 +111,7 @@ export const sendOtp = async (req, res) => {
     const recent = await Otp.findOne({ emailFingerprint: fpRecent, purpose, createdAt: { $gt: new Date(Date.now() - 60000) } });
     if (recent) return res.status(429).json({ message: 'Please wait before requesting another code' });
 
-    // Delete old OTPs for this email+purpose
-    await Otp.deleteMany({ emailFingerprint: fpRecent, purpose });
-
-    const otp = generateOtp();
-    await Otp.create({ emailFingerprint: fpRecent, otp: simpleHashOtp(otp), purpose });
+    const otp = await issueOtp({ emailFingerprint: fpRecent, purpose });
     await sendOtpEmail(email, otp, purpose);
 
     res.json({ message: 'Verification code sent to your email' });
@@ -147,15 +129,9 @@ export const verifyOtp = async (req, res) => {
 
     const pubKeyVerify = getPublicKey('user-data');
     const fpVerify = fingerprint(email.toLowerCase(), pubKeyVerify);
-    const record = await Otp.findOne({ emailFingerprint: fpVerify, purpose });
-    if (!record) return res.status(400).json({ message: 'No verification code found. Please request a new one.' });
-    if (record.expiresAt < new Date()) {
-      await Otp.deleteOne({ _id: record._id });
-      return res.status(400).json({ message: 'Code has expired. Please request a new one.' });
-    }
-    if (record.otp !== simpleHashOtp(otp)) return res.status(400).json({ message: 'Invalid verification code' });
-
-    await Otp.deleteOne({ _id: record._id });
+    if (purpose !== 'signup') return res.status(400).json({ message: 'Invalid purpose' });
+    const check = await consumeOtp({ emailFingerprint: fpVerify, purpose, otp });
+    if (!check.ok) return res.status(400).json({ message: check.message });
 
     // Return a short-lived verification token
     const verificationToken = generateSessionToken({ email: email.toLowerCase(), purpose, verified: true }, 'otp', 10 * 60);
@@ -171,7 +147,10 @@ export const verifyOtp = async (req, res) => {
 async function findUserByEmail(email) {
   const pubKey = getPublicKey('user-data'); // throws if keys not ready
   const fp = fingerprint(email.toLowerCase(), pubKey);
-  return await User.findOne({ emailFingerprint: fp });
+  const user = await User.findOne({ emailFingerprint: fp });
+  // Confirm the decrypted address really matches, not just the fingerprint
+  if (user && user.getDecryptedData().email?.toLowerCase() !== email.toLowerCase()) return null;
+  return user;
 }
 
 // ─── Register ────────────────────────────────────────────────────────────────
@@ -203,12 +182,12 @@ export const register = async (req, res) => {
     const pubKeyFp = getPublicKey('user-data');
     const fp = fingerprint(email.toLowerCase(), pubKeyFp);
     const existingUser = await User.findOne({ emailFingerprint: fp });
+    if (existingUser && existingUser.isActive) {
+      return res.status(400).json({ message: 'User already exists with this email' });
+    }
     if (existingUser) {
-      console.log('[Auth] Registration attempt with existing emailFingerprint:', fp, 'found:', String(existingUser._id), 'active:', existingUser.isActive);
-      // If the caller successfully verified the email just now (verificationDecoded),
-      // allow re-registration by removing the existing record (covers deleted/stale cases
-      // and cases where clients request recreation). This requires possession of the
-      // verification token and thus control over the email address.
+      // Only a deactivated record may be replaced, and only by someone who just
+      // proved control of the email address with a sign-up code
       try {
         await Promise.all([
           User.deleteOne({ _id: existingUser._id }),
@@ -222,10 +201,11 @@ export const register = async (req, res) => {
       }
     }
 
-    const user = new User({ name, email, password, phone, role: role || 'tenant', profileImage: profileImage || '', isEmailVerified: true });
+    // Self-registration can only create tenant or owner accounts
+    const safeRole = ['owner', 'tenant'].includes(role) ? role : 'tenant';
+    const user = new User({ name, email, password, phone, role: safeRole, profileImage: profileImage || '', isEmailVerified: true });
     try {
       await user.save();
-      console.log('[Auth] Registered new user:', user._id, user.email);
     } catch (err) {
       // Handle duplicate-key errors more robustly by inspecting the duplicate
       // key value (err.keyValue) and attempting to remove a stale/inactive
@@ -282,7 +262,7 @@ export const register = async (req, res) => {
     if (error.code === 11000) {
       return res.status(400).json({ message: 'User already exists with this email' });
     }
-    res.status(500).json({ message: error.message || 'Server error during registration' });
+    res.status(500).json({ message: 'Server error during registration' });
   }
 };
 
@@ -309,8 +289,7 @@ export const login = async (req, res) => {
     const isPasswordValid = await user.comparePassword(password);
     if (!isPasswordValid) {
       await user.incrementLoginAttempts();
-      const attemptsLeft = Math.max(0, 5 - user.failedLoginAttempts);
-      return res.status(401).json({ message: `Invalid credentials. ${attemptsLeft} attempt(s) remaining before lockout.` });
+      return res.status(401).json({ message: 'Invalid credentials' });
     }
 
     // Reset failed attempts on success
@@ -326,11 +305,7 @@ export const login = async (req, res) => {
     // Two-factor authentication check
     if (user.twoFactorEnabled) {
       // Send OTP and return requires2FA
-      const otp = generateOtp();
-        const pubKey2fa = getPublicKey('user-data');
-        const fp2fa = fingerprint(email.toLowerCase(), pubKey2fa);
-        await Otp.deleteMany({ emailFingerprint: fp2fa, purpose: '2fa-login' });
-        await Otp.create({ emailFingerprint: fp2fa, otp: simpleHashOtp(otp), purpose: '2fa-login' });
+      const otp = await issueOtp({ emailFingerprint: fp, purpose: '2fa-login', userId: user._id });
       await sendOtpEmail(email, otp, '2fa-login');
 
       const tempToken = generateSessionToken({ userId: String(user._id), purpose: '2fa-pending' }, 'session', 10 * 60);
@@ -365,18 +340,15 @@ export const verify2FA = async (req, res) => {
     if (decoded.purpose !== '2fa-pending') return res.status(400).json({ message: 'Invalid token' });
 
     const user = await User.findById(decoded.userId);
-    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (!user || !user.isActive) return res.status(404).json({ message: 'User not found' });
 
     // email is not in plaintext in DB — decrypt it to locate the OTP record
     const decryptedUser = user.getDecryptedData();
     if (!decryptedUser.email) return res.status(500).json({ message: 'Unable to resolve user email' });
     const pubKey2faLookup = getPublicKey('user-data');
     const fp2faLookup = fingerprint(decryptedUser.email.toLowerCase(), pubKey2faLookup);
-    const record = await Otp.findOne({ emailFingerprint: fp2faLookup, purpose: '2fa-login' });
-    if (!record || record.otp !== simpleHashOtp(otp)) return res.status(400).json({ message: 'Invalid verification code' });
-    if (record.expiresAt < new Date()) return res.status(400).json({ message: 'Code expired' });
-
-    await Otp.deleteOne({ _id: record._id });
+    const check = await consumeOtp({ emailFingerprint: fp2faLookup, purpose: '2fa-login', otp, userId: user._id });
+    if (!check.ok) return res.status(400).json({ message: check.message });
 
     const ip = req.ip || '';
     const userAgent = req.headers['user-agent'] || '';
@@ -395,9 +367,9 @@ export const refreshAccessToken = async (req, res) => {
     const refreshTokenStr = req.cookies.refreshToken;
     if (!refreshTokenStr) return res.status(401).json({ message: 'No refresh token' });
 
-    const record = await RefreshToken.findOne({ token: refreshTokenStr });
+    // Atomically claim the token so two concurrent refreshes can't both succeed
+    const record = await RefreshToken.findOneAndDelete({ token: String(refreshTokenStr) });
     if (!record || record.expiresAt < new Date()) {
-      if (record) await RefreshToken.deleteOne({ _id: record._id });
       clearAuthCookies(res);
       return res.status(401).json({ message: 'Refresh token expired. Please log in again.' });
     }
@@ -412,18 +384,16 @@ export const refreshAccessToken = async (req, res) => {
 
     const user = await User.findById(record.userId);
     if (!user || !user.isActive) {
-      await RefreshToken.deleteOne({ _id: record._id });
       clearAuthCookies(res);
       return res.status(401).json({ message: 'User not found' });
     }
 
-    // Rotate refresh token
-    await RefreshToken.deleteOne({ _id: record._id });
+    // Rotate refresh token (the old one was removed above)
     const ip = req.ip || '';
     const userAgent = req.headers['user-agent'] || '';
     await setAuthCookies(res, user._id, ip, userAgent);
 
-    res.json({ message: 'Token refreshed', data: { user: safeUserResponse(user) } });
+    res.json({ message: 'Token refreshed', data: { user: safeUserResponse(user) }, passwordExpired: user.isPasswordExpired() });
   } catch (error) {
     console.error('Refresh token error:', error);
     res.status(500).json({ message: 'Token refresh failed' });
@@ -439,12 +409,12 @@ export const forgotPassword = async (req, res) => {
     const user = await findUserByEmail(email);
     if (!user) return res.json({ message: 'If an account exists with this email, a verification code has been sent.' });
 
-    const otp = generateOtp();
-    const pubKeyForgot = getPublicKey('user-data');
-    const fpForgot = fingerprint(email.toLowerCase(), pubKeyForgot);
-    await Otp.deleteMany({ emailFingerprint: fpForgot, purpose: 'forgot-password' });
-    await Otp.create({ emailFingerprint: fpForgot, otp: simpleHashOtp(otp), purpose: 'forgot-password' }); 
-    await sendOtpEmail(email, otp, 'forgot-password');
+    const fpForgot = user.emailFingerprint;
+    const recent = await Otp.findOne({ emailFingerprint: fpForgot, purpose: 'forgot-password', createdAt: { $gt: new Date(Date.now() - 60000) } });
+    if (!recent) {
+      const otp = await issueOtp({ emailFingerprint: fpForgot, purpose: 'forgot-password', userId: user._id });
+      await sendOtpEmail(email, otp, 'forgot-password');
+    }
 
     res.json({ message: 'If an account exists with this email, a verification code has been sent.' });
   } catch (error) {
@@ -462,24 +432,19 @@ export const resetPassword = async (req, res) => {
     const policyErrors = validatePasswordPolicy(newPassword);
     if (policyErrors.length > 0) return res.status(400).json({ message: 'Password does not meet requirements', errors: policyErrors });
 
-    const pubKeyForgotVerify = getPublicKey('user-data');
-    const fpForgotVerify = fingerprint(email.toLowerCase(), pubKeyForgotVerify);
-    const record = await Otp.findOne({ emailFingerprint: fpForgotVerify, purpose: 'forgot-password' });
-    if (!record || record.otp !== simpleHashOtp(otp)) return res.status(400).json({ message: 'Invalid or expired verification code' });
-    if (record.expiresAt < new Date()) return res.status(400).json({ message: 'Code expired' });
+    const account = await findUserByEmail(email);
+    if (!account) return res.status(400).json({ message: 'Invalid or expired verification code' });
+    const check = await consumeOtp({ emailFingerprint: account.emailFingerprint, purpose: 'forgot-password', otp, userId: account._id });
+    if (!check.ok) return res.status(400).json({ message: check.message });
 
-    // Plaintext email never stored — use fingerprint lookup only
-    const pubKeyReset = getPublicKey('user-data');
-    const fpReset = fingerprint(email.toLowerCase(), pubKeyReset);
-    const user = await User.findOne({ emailFingerprint: fpReset }).select('+password +passwordSalt');
-    if (!user) return res.status(404).json({ message: 'User not found' });
+    const user = await User.findById(account._id).select('+password +passwordSalt');
+    if (!user) return res.status(400).json({ message: 'Invalid or expired verification code' });
 
     user.password = newPassword;
     user.failedLoginAttempts = 0;
     user.lockUntil = null;
     await user.save();
-    await Otp.deleteOne({ _id: record._id });
-    // Invalidate all existing sessions
+    // Invalidate all existing sessions (access tokens are rejected via passwordChangedAt)
     await RefreshToken.deleteMany({ userId: user._id });
 
     res.json({ message: 'Password reset successful. Please log in with your new password.' });
@@ -578,6 +543,7 @@ export const deleteCurrentUser = async (req, res) => {
         ? { $or: [{ tenant: userId }, { property: { $in: propertyIds } }] }
         : { tenant: userId };
       await Promise.all([
+        invalidatePropertyCache(),
         propertyIds.length ? Property.deleteMany({ _id: { $in: propertyIds } }).session(session) : Promise.resolve(),
         Booking.deleteMany(bookingFilter).session(session),
         Review.deleteMany(reviewFilter).session(session),

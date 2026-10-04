@@ -1,8 +1,25 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { MapPin, Star, Filter, Search, Grid, List, ChevronDown } from 'lucide-react';
 import { getProperties } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
+
+const DEFAULT_FILTERS = {
+  search: '',
+  minPrice: '',
+  maxPrice: '',
+  availabilityStatus: '',
+  type: '',
+  sortBy: 'createdAt',
+  limit: 1000
+};
+
+const toNumber = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const getRating = (p) => toNumber(typeof p?.averageRating === 'number' ? p.averageRating : p?.rating);
 
 const Properties = () => {
   const location = useLocation();
@@ -17,29 +34,14 @@ const Properties = () => {
     return params.get('search') || '';
   };
 
-  const [filters, setFilters] = useState({
-    search: getSearchParam(),
-    minPrice: '',
-    maxPrice: '',
-    availabilityStatus: '',
-    type: '',
-    sortBy: 'createdAt',
-    limit: 1000
-  });
-  const [draftFilters, setDraftFilters] = useState({
-    search: getSearchParam(),
-    minPrice: '',
-    maxPrice: '',
-    availabilityStatus: '',
-    type: '',
-    sortBy: 'createdAt',
-    limit: 1000
-  });
+  const [filters, setFilters] = useState(() => ({ ...DEFAULT_FILTERS, search: getSearchParam() }));
+  const [draftFilters, setDraftFilters] = useState(() => ({ ...DEFAULT_FILTERS, search: getSearchParam() }));
   // Update filters if URL search param changes
   useEffect(() => {
     const urlSearch = getSearchParam();
-    setFilters((prev) => ({ ...prev, search: urlSearch }));
-    setDraftFilters((prev) => ({ ...prev, search: urlSearch }));
+    // Keep the same object when nothing changed so the fetch effect does not re-run
+    setFilters((prev) => (prev.search === urlSearch ? prev : { ...prev, search: urlSearch }));
+    setDraftFilters((prev) => (prev.search === urlSearch ? prev : { ...prev, search: urlSearch }));
   }, [location.search]);
   const [viewMode, setViewMode] = useState('grid');
   const [showFilters, setShowFilters] = useState(false);
@@ -53,6 +55,7 @@ const Properties = () => {
       setLoading(true);
       const response = await getProperties(filters);
       setProperties(response.data.properties || []);
+      setError('');
     } catch (error) {
       setError('Failed to fetch properties');
       console.error('Error fetching properties:', error);
@@ -72,16 +75,21 @@ const Properties = () => {
   };
 
   const clearFilters = () => {
-    const cleared = {
-      search: '',
-      minPrice: '',
-      maxPrice: '',
-      availabilityStatus: '',
-      sortBy: 'createdAt'
-    };
+    const cleared = { ...DEFAULT_FILTERS };
     setDraftFilters(cleared);
     setFilters(cleared);
   };
+
+  // Server only sorts by date; apply price / rating sorts on the client
+  const sortedProperties = useMemo(() => {
+    const list = [...properties];
+    switch (filters.sortBy) {
+      case 'price': return list.sort((a, b) => toNumber(a.price) - toNumber(b.price));
+      case '-price': return list.sort((a, b) => toNumber(b.price) - toNumber(a.price));
+      case 'rating': return list.sort((a, b) => (getRating(b) - getRating(a)) || (toNumber(b.totalReviews) - toNumber(a.totalReviews)));
+      default: return list;
+    }
+  }, [properties, filters.sortBy]);
 
   const getAvailabilityColor = (status) => {
     switch (status) {
@@ -128,7 +136,7 @@ const Properties = () => {
             Properties
           </h1>
           <div className="flex items-center space-x-4">
-            {user?.role === 'owner' && (
+            {(user?.role === 'owner' || user?.role === 'admin') && (
               <button
                 onClick={() => navigate('/properties/new')}
                 className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-sm font-medium transition-colors"
@@ -286,7 +294,7 @@ const Properties = () => {
           </div>
         ) : (
           <div className={viewMode === 'grid' ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6' : 'space-y-6'}>
-            {properties.map((property) => (
+            {sortedProperties.map((property) => (
               <Link
                 key={property._id}
                 to={`/properties/${property._id}`}
@@ -296,8 +304,12 @@ const Properties = () => {
               >
                 <div className={(viewMode === 'list' ? 'w-1/3 ' : 'w-full ') + 'relative'}>
                   <img
-                    src={property.images?.[0] || '/api/placeholder/400/300'}
+                    src={property.images?.[0] || '/placeholder.svg'}
                     alt={property.title}
+                    onError={(e) => {
+                      e.currentTarget.onerror = null;
+                      if (!e.currentTarget.src.endsWith('/placeholder.svg')) e.currentTarget.src = '/placeholder.svg';
+                    }}
                     className={`object-cover ${viewMode === 'list' ? 'h-full' : 'h-48'} w-full`}
                   />
                   <span

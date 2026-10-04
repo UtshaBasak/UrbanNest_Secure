@@ -1,7 +1,10 @@
 import { validationResult } from 'express-validator';
 import Booking from '../models/Booking.js';
 import Property from '../models/Property.js';
+import LeaveRequest from '../models/LeaveRequest.js';
 import { createNotification } from './notificationController.js';
+import { invalidatePropertyCache } from '../utils/propertyCache.js';
+import { isValidId, parsePagination } from '../utils/validation.js';
 
 // Helper function to check if property is currently occupied
 const isPropertyCurrentlyOccupied = async (propertyId) => {
@@ -15,13 +18,21 @@ const isPropertyCurrentlyOccupied = async (propertyId) => {
   return currentBookings.length > 0;
 };
 
-// Helper function to update property availability based on current bookings
+// Helper function to update property availability based on current bookings.
+// Only toggles between Available and Booked so a status the owner set by hand
+// (e.g. "Not Available") is never overwritten.
 const updatePropertyAvailability = async (propertyId) => {
+  const property = await Property.findById(propertyId).select('availabilityStatus availability');
+  if (!property) return;
+  const current = property.availabilityStatus || property.availability;
   const isOccupied = await isPropertyCurrentlyOccupied(propertyId);
-  await Property.findByIdAndUpdate(propertyId, {
-    availabilityStatus: isOccupied ? 'Booked' : 'Available',
-    availability: isOccupied ? 'Booked' : 'Available'
-  });
+  let next = current;
+  if (isOccupied) next = 'Booked';
+  else if (current === 'Booked') next = 'Available';
+  if (next !== current) {
+    await Property.updateOne({ _id: propertyId }, { availabilityStatus: next, availability: next });
+    invalidatePropertyCache();
+  }
 };
 
 // @desc Create booking request
@@ -38,10 +49,13 @@ export const createBooking = async (req, res) => {
     }
 
     const { property: propertyId, startDate, endDate, message } = req.body;
+    if (!isValidId(propertyId)) {
+      return res.status(400).json({ message: 'Invalid property id' });
+    }
 
     // Check if property exists and is available
     const property = await Property.findById(propertyId);
-    if (!property) {
+    if (!property || property.isActive === false) {
       return res.status(404).json({ message: 'Property not found' });
     }
     const availability = property.availability || property.availabilityStatus;
@@ -54,19 +68,19 @@ export const createBooking = async (req, res) => {
       return res.status(400).json({ message: 'You cannot book your own property' });
     }
 
-    // Calculate total amount with lenient date handling
-    let start = new Date(startDate);
-    let end = new Date(endDate);
-    // If either date is invalid, default to a 1-day booking from today
-    if (isNaN(start.getTime())) {
-      start = new Date();
+    // Only one open request per tenant per property
+    const existingRequest = await Booking.exists({ tenant: req.user._id, property: propertyId, status: 'pending' });
+    if (existingRequest) {
+      return res.status(400).json({ message: 'You already have a pending booking request for this property' });
     }
-    if (isNaN(end.getTime())) {
-      end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return res.status(400).json({ message: 'Valid start and end dates are required' });
     }
-    // If end is before or equal to start, make it at least 1 day
     if (end <= start) {
-      end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+      return res.status(400).json({ message: 'End date must be after start date' });
     }
     const msPerDay = 1000 * 60 * 60 * 24;
     const daysRaw = Math.ceil((end - start) / msPerDay);
@@ -154,9 +168,11 @@ export const createBooking = async (req, res) => {
 
   } catch (error) {
     console.error('Create booking error:', error);
-    res.status(500).json({ 
-      message: `Server error: ${error.message}`
-    });
+    // Date rules from the Booking model's validate hook are user errors
+    if (error.name === 'ValidationError' || /date/i.test(error.message)) {
+      return res.status(400).json({ message: error.message });
+    }
+    res.status(500).json({ message: 'Server error while creating booking' });
   }
 };
 
@@ -165,7 +181,8 @@ export const createBooking = async (req, res) => {
 // @access Private
 export const getMyBookings = async (req, res) => {
   try {
-    const { status, page = 1, limit = 10 } = req.query;
+    const { status } = req.query;
+    const { page, limit, skip } = parsePagination(req.query);
     const query = {};
 
     if (req.user.role === 'tenant') {
@@ -176,7 +193,7 @@ export const getMyBookings = async (req, res) => {
       query.property = { $in: properties.map(p => p._id) };
     }
 
-    if (status) query.status = status;
+    if (typeof status === 'string' && status) query.status = status;
 
     const bookings = await Booking.find(query)
       .populate('tenant', 'nameEncrypted emailEncrypted phoneEncrypted isEncrypted')
@@ -185,12 +202,12 @@ export const getMyBookings = async (req, res) => {
         select: 'titleEncrypted locationEncrypted priceEncrypted images owner isEncrypted',
         populate: {
           path: 'owner',
-          select: 'name email _id'
+          select: 'nameEncrypted profileImage isEncrypted'
         }
       })
       .sort({ createdAt: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+      .limit(limit)
+      .skip(skip);
 
     const total = await Booking.countDocuments(query);
 
@@ -199,9 +216,9 @@ export const getMyBookings = async (req, res) => {
         bookings,
         pagination: {
           total,
-          page: Number(page),
+          page,
           pages: Math.ceil(total / limit),
-          limit: Number(limit)
+          limit
         }
       }
     });
@@ -217,18 +234,28 @@ export const getMyBookings = async (req, res) => {
 // @access Private (Owner, Admin)
 export const updateBookingStatus = async (req, res) => {
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ message: 'Validation failed', errors: errors.array() });
+    }
+
     const { status, rejectionReason } = req.body;
     const booking = await Booking.findById(req.params.id)
       .populate('property');
 
-    if (!booking) {
+    if (!booking || !booking.property) {
       return res.status(404).json({ message: 'Booking not found' });
     }
 
     // Check if user owns the property or is admin
-    if (req.user.role !== 'admin' && 
+    if (req.user.role !== 'admin' &&
         booking.property.owner.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Access denied' });
+    }
+
+    // Only pending requests can be decided
+    if (booking.status !== 'pending') {
+      return res.status(400).json({ message: `Cannot change a booking that is already ${booking.status}` });
     }
 
     booking.status = status;
@@ -340,7 +367,7 @@ export const deleteBooking = async (req, res) => {
   try {
     const booking = await Booking.findById(req.params.id).populate('property', 'owner');
 
-    if (!booking) {
+    if (!booking || !booking.property) {
       return res.status(404).json({ message: 'Booking not found' });
     }
 
@@ -353,8 +380,9 @@ export const deleteBooking = async (req, res) => {
       return res.status(403).json({ message: 'Access denied' });
     }
 
-    // Delete the booking
+    // Delete the booking and any leave requests that reference it
     await Booking.findByIdAndDelete(req.params.id);
+    await LeaveRequest.deleteMany({ booking: booking._id });
 
     // Update property availability if it was an approved booking
     if (booking.status === 'approved') {

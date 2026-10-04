@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import * as authAPI from '../utils/api';
 
 const AuthContext = createContext();
@@ -11,48 +11,77 @@ export const useAuth = () => {
   return context;
 };
 
+// Ensure the user object always exposes both `id` and `_id`
+const normalizeUser = (u) => {
+  if (!u) return null;
+  const id = u._id || u.id;
+  return id ? { ...u, id, _id: id } : u;
+};
+
+// Share a single in-flight /auth/refresh request so concurrent callers
+// (e.g. StrictMode's double-invoked effects) don't trigger duplicate refreshes
+let refreshInFlight = null;
+const refreshOnce = () => {
+  if (!refreshInFlight) {
+    refreshInFlight = authAPI.refreshToken().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
+};
+
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
+  const [user, setUserState] = useState(null);
   const [loading, setLoading] = useState(true);
   const [requires2FA, setRequires2FA] = useState(false);
   const [tempToken, setTempToken] = useState(null);
   const [passwordExpired, setPasswordExpired] = useState(false);
 
-  useEffect(() => {
-    checkAuthStatus();
+  const setUser = useCallback((next) => {
+    setUserState((prev) => normalizeUser(typeof next === 'function' ? next(prev) : next));
   }, []);
 
-  // Auto-refresh access token every 13 minutes
-  useEffect(() => {
-    if (!user) return;
-    const interval = setInterval(async () => {
-      try {
-        await authAPI.refreshToken();
-      } catch {
-        // Refresh failed
-      }
-    }, 13 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [user]);
+  // Apply a user + password-expiry state from an auth response
+  const applyAuthResponse = useCallback((response) => {
+    const nextUser = response?.data?.user || null;
+    setUser(nextUser);
+    setPasswordExpired(Boolean(response?.passwordExpired || nextUser?.passwordExpired));
+  }, [setUser]);
 
-  const checkAuthStatus = async () => {
+  const checkAuthStatus = useCallback(async () => {
     try {
       const response = await authAPI.getCurrentUser();
-      setUser(response.data.user);
-      if (response.data.user?.passwordExpired) {
-        setPasswordExpired(true);
-      }
-    } catch (error) {
+      applyAuthResponse(response);
+    } catch {
       try {
-        const refreshRes = await authAPI.refreshToken();
-        setUser(refreshRes.data.user);
+        const refreshRes = await refreshOnce();
+        applyAuthResponse(refreshRes);
       } catch {
         setUser(null);
       }
     } finally {
       setLoading(false);
     }
-  };
+  }, [applyAuthResponse, setUser]);
+
+  useEffect(() => {
+    checkAuthStatus();
+  }, [checkAuthStatus]);
+
+  // Auto-refresh access token every 13 minutes
+  const isLoggedIn = Boolean(user);
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    const interval = setInterval(async () => {
+      try {
+        await refreshOnce();
+      } catch {
+        // Refresh failed: the session is no longer valid
+        setUser(null);
+      }
+    }, 13 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [isLoggedIn, setUser]);
 
   const login = async (email, password) => {
     const response = await authAPI.login(email, password);
@@ -61,27 +90,21 @@ export const AuthProvider = ({ children }) => {
       setTempToken(response.tempToken);
       return { requires2FA: true };
     }
-    setUser(response.data.user);
-    if (response.passwordExpired) {
-      setPasswordExpired(true);
-    }
+    applyAuthResponse(response);
     return response.data;
   };
 
   const complete2FA = async (otp) => {
     const response = await authAPI.verify2FA(tempToken, otp);
-    setUser(response.data.user);
+    applyAuthResponse(response);
     setRequires2FA(false);
     setTempToken(null);
-    if (response.passwordExpired) {
-      setPasswordExpired(true);
-    }
     return response.data;
   };
 
   const register = async (userData) => {
     const response = await authAPI.register(userData);
-    setUser(response.data.user);
+    applyAuthResponse(response);
     return response.data;
   };
 

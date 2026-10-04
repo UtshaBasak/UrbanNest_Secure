@@ -7,10 +7,12 @@ import { Save, Building2, Edit, Eye, Mail, Shield, Lock, AlertCircle, CheckCircl
 const ProfileSettings = () => {
   const { user, loading, updateProfile: updateAuthProfile, logout, checkAuthStatus } = useAuth();
   const navigate = useNavigate();
-  const [editForm, setEditForm] = useState({ name: '', phone: '', profileImage: '', role: '' });
+  const [editForm, setEditForm] = useState({ name: '', phone: '', profileImage: '' });
   const [saving, setSaving] = useState(false);
   const [ownerProps, setOwnerProps] = useState([]);
-  const isOwner = (editForm.role || user?.role) === 'owner';
+  // Role is managed by the server and cannot be changed from this page
+  const isOwner = user?.role === 'owner';
+  const userId = user?._id || user?.id;
 
   // ─── Change Email State ──────────────────────────────────────────────────
   const [emailModal, setEmailModal] = useState(null);
@@ -35,17 +37,17 @@ const ProfileSettings = () => {
 
   useEffect(() => {
     if (user) {
-      setEditForm({ name: user.name || '', phone: user.phone || '', profileImage: user.profileImage || '', role: user.role || 'tenant' });
+      setEditForm({ name: user.name || '', phone: user.phone || '', profileImage: user.profileImage || '' });
     }
   }, [user]);
 
   useEffect(() => {
-    if (editForm.role === 'owner' && user) {
-      getPropertiesByOwner(user._id || user.id).then(res => setOwnerProps(res.data.properties || [])).catch(() => setOwnerProps([]));
+    if (isOwner && userId) {
+      getPropertiesByOwner(userId).then(res => setOwnerProps(res.data.properties || [])).catch(() => setOwnerProps([]));
     } else {
       setOwnerProps([]);
     }
-  }, [editForm.role, user]);
+  }, [isOwner, userId]);
 
   const handleImageFile = (file) => {
     if (!file) return;
@@ -58,9 +60,8 @@ const ProfileSettings = () => {
     e.preventDefault();
     try {
       setSaving(true);
-      const formData = { ...editForm };
-      if (user?.role === 'admin') formData.role = 'admin';
-      await updateAuthProfile(formData);
+      const { name, phone, profileImage } = editForm;
+      await updateAuthProfile({ name, phone, profileImage });
     } catch (e) {
       alert('Failed to save profile');
     } finally { setSaving(false); }
@@ -91,6 +92,22 @@ const ProfileSettings = () => {
   };
 
   const closeEmailModal = () => { setEmailModal(null); setEmailPassword(''); setNewEmail(''); setEmailOtp(''); setEmailError(''); };
+  const closeTfaModal = () => setTfaModal(false);
+  const closeDeleteModal = () => { setDeleteModal(false); setDeleteError(''); setDeletePassword(''); };
+
+  // Close whichever modal is open on Escape
+  const anyModalOpen = Boolean(emailModal || tfaModal || deleteModal);
+  useEffect(() => {
+    if (!anyModalOpen) return;
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      setEmailModal(null); setEmailPassword(''); setNewEmail(''); setEmailOtp(''); setEmailError('');
+      setTfaModal(false);
+      setDeleteModal(false); setDeleteError(''); setDeletePassword('');
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [anyModalOpen]);
 
   // ─── 2FA handlers ────────────────────────────────────────────────────────
   const handleToggle2FA = async () => {
@@ -143,30 +160,24 @@ const ProfileSettings = () => {
             </div>
             <div className="md:col-span-2 space-y-4">
               <div>
-                <label className="block text-sm mb-2 text-neutral-700 dark:text-neutral-300">Name</label>
-                <input value={editForm.name} onChange={(e) => setEditForm(p => ({ ...p, name: e.target.value }))}
+                <label htmlFor="profile-name" className="block text-sm mb-2 text-neutral-700 dark:text-neutral-300">Name</label>
+                <input id="profile-name" value={editForm.name} onChange={(e) => setEditForm(p => ({ ...p, name: e.target.value }))}
                   className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-white" required />
               </div>
               <div>
-                <label className="block text-sm mb-2 text-neutral-700 dark:text-neutral-300">Role</label>
-                {user?.role === 'admin' ? (
-                  <div className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-gray-100 dark:bg-neutral-600 text-neutral-700 dark:text-neutral-300">Admin</div>
-                ) : (
-                  <select value={editForm.role} onChange={e => setEditForm(p => ({ ...p, role: e.target.value }))}
-                    className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-white">
-                    <option value="tenant">Tenant</option>
-                    <option value="owner">Owner</option>
-                  </select>
-                )}
+                <span id="profile-role-label" className="block text-sm mb-2 text-neutral-700 dark:text-neutral-300">Role</span>
+                <div aria-labelledby="profile-role-label" className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-gray-100 dark:bg-neutral-600 text-neutral-700 dark:text-neutral-300 capitalize">
+                  {user?.role || 'tenant'}
+                </div>
               </div>
               <div>
-                <label className="block text-sm mb-2 text-neutral-700 dark:text-neutral-300">Phone Number</label>
-                <input value={editForm.phone} onChange={(e) => setEditForm(p => ({ ...p, phone: e.target.value }))}
+                <label htmlFor="profile-phone" className="block text-sm mb-2 text-neutral-700 dark:text-neutral-300">Phone Number</label>
+                <input id="profile-phone" value={editForm.phone} onChange={(e) => setEditForm(p => ({ ...p, phone: e.target.value }))}
                   className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-white" />
               </div>
               <div>
-                <label className="block text-sm mb-2 text-neutral-700 dark:text-neutral-300">Profile Photo</label>
-                <input type="file" accept="image/*" onChange={(e) => handleImageFile(e.target.files?.[0])}
+                <label htmlFor="profile-photo" className="block text-sm mb-2 text-neutral-700 dark:text-neutral-300">Profile Photo</label>
+                <input id="profile-photo" type="file" accept="image/*" onChange={(e) => handleImageFile(e.target.files?.[0])}
                   className="block w-full text-sm text-neutral-700 dark:text-neutral-200 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-cyan-50 file:text-cyan-700 hover:file:bg-cyan-100 dark:file:bg-cyan-900/40 dark:file:text-cyan-300" />
               </div>
               <div className="flex items-center justify-between">
@@ -174,7 +185,7 @@ const ProfileSettings = () => {
                   <Save className="h-4 w-4 mr-2" /> {saving ? 'Saving...' : 'Save Changes'}
                 </button>
                 {user?.role !== 'admin' && (
-                  <button onClick={(e) => {
+                  <button type="button" onClick={(e) => {
                     e.preventDefault();
                     setDeleteModal(true);
                   }} className="inline-flex px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs">Delete Account</button>
@@ -210,7 +221,10 @@ const ProfileSettings = () => {
                 <p className="text-sm text-neutral-500 dark:text-neutral-400">{user.twoFactorEnabled ? 'Enabled — OTP required on every login' : 'Disabled — Single step login'}</p>
               </div>
             </div>
-            <button onClick={() => { setTfaModal(true); setTfaError(''); setTfaPassword(''); }}
+            <button type="button" onClick={() => { setTfaModal(true); setTfaError(''); setTfaPassword(''); }}
+              role="switch"
+              aria-checked={Boolean(user.twoFactorEnabled)}
+              aria-label="Two-step verification"
               className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${user.twoFactorEnabled ? 'bg-green-500' : 'bg-neutral-300 dark:bg-neutral-600'}`}>
               <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform shadow-sm ${user.twoFactorEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
             </button>
@@ -231,12 +245,12 @@ const ProfileSettings = () => {
                 {ownerProps.map(p => (
                   <div key={p._id} className="flex items-center justify-between border border-neutral-200 dark:border-neutral-700 rounded-lg p-3">
                     <div className="flex items-center space-x-3">
-                      <img src={p.images?.[0] || '/api/placeholder/80/80'} alt={p.title} className="w-14 h-14 object-cover rounded-sm" />
+                      <img src={p.images?.[0] || '/placeholder.svg'} alt={p.title} onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/placeholder.svg'; }} className="w-14 h-14 object-cover rounded-sm" />
                       <div><div className="font-medium text-neutral-900 dark:text-white">{p.title}</div><div className="text-sm text-neutral-600 dark:text-neutral-400">{p.location}</div></div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button onClick={() => navigate(`/properties/${p._id}`)} className="p-2 text-neutral-600 dark:text-neutral-300 hover:text-cyan-600"><Eye className="h-4 w-4" /></button>
-                      <button onClick={() => navigate(`/properties/${p._id}/edit`)} className="p-2 text-neutral-600 dark:text-neutral-300 hover:text-blue-600"><Edit className="h-4 w-4" /></button>
+                      <button type="button" onClick={() => navigate(`/properties/${p._id}`)} aria-label={`View ${p.title || 'property'}`} className="p-2 text-neutral-600 dark:text-neutral-300 hover:text-cyan-600"><Eye className="h-4 w-4" /></button>
+                      <button type="button" onClick={() => navigate(`/properties/${p._id}/edit`)} aria-label={`Edit ${p.title || 'property'}`} className="p-2 text-neutral-600 dark:text-neutral-300 hover:text-blue-600"><Edit className="h-4 w-4" /></button>
                     </div>
                   </div>
                 ))}
@@ -248,10 +262,10 @@ const ProfileSettings = () => {
 
       {/* ═══ Change Email Modal ═══════════════════════════════════════════════ */}
       {emailModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={closeEmailModal}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={closeEmailModal} role="dialog" aria-modal="true" aria-label="Change email">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
           <div className="relative bg-white dark:bg-neutral-800 rounded-2xl shadow-2xl max-w-sm w-full p-6 animate-slide-up" onClick={e => e.stopPropagation()}>
-            <button onClick={closeEmailModal} className="absolute top-4 right-4 text-neutral-400 hover:text-neutral-600"><X className="w-5 h-5" /></button>
+            <button type="button" onClick={closeEmailModal} aria-label="Close" className="absolute top-4 right-4 text-neutral-400 hover:text-neutral-600"><X className="w-5 h-5" /></button>
             {emailError && (
               <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 rounded-lg flex items-center space-x-2">
                 <AlertCircle className="w-4 h-4 text-red-600 shrink-0" /><span className="text-red-700 dark:text-red-300 text-sm">{emailError}</span>
@@ -263,7 +277,7 @@ const ProfileSettings = () => {
                 <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-4">Enter your current password to continue.</p>
                 <div className="relative mb-4">
                   <Lock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
-                  <input type="password" value={emailPassword} onChange={(e) => { setEmailPassword(e.target.value); setEmailError(''); }} autoFocus
+                  <input type="password" aria-label="Current password" value={emailPassword} onChange={(e) => { setEmailPassword(e.target.value); setEmailError(''); }} autoFocus
                     className="w-full h-11 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-hidden focus:ring-2 focus:ring-cyan-600 pl-12"
                     placeholder="Current password" />
                 </div>
@@ -276,7 +290,7 @@ const ProfileSettings = () => {
                 <h3 className="text-lg font-bold text-neutral-900 dark:text-white mb-4">New Email Address</h3>
                 <div className="relative mb-4">
                   <Mail className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
-                  <input type="email" value={newEmail} onChange={(e) => { setNewEmail(e.target.value); setEmailError(''); }} autoFocus
+                  <input type="email" aria-label="New email address" value={newEmail} onChange={(e) => { setNewEmail(e.target.value); setEmailError(''); }} autoFocus
                     className="w-full h-11 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-hidden focus:ring-2 focus:ring-cyan-600 pl-12"
                     placeholder="Enter new email" />
                 </div>
@@ -292,7 +306,7 @@ const ProfileSettings = () => {
                 <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-4">Enter the code sent to <strong>{newEmail}</strong></p>
                 <div className="relative mb-4">
                   <KeyRound className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
-                  <input type="text" value={emailOtp} onChange={(e) => setEmailOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} maxLength={6} autoFocus
+                  <input type="text" aria-label="Verification code" value={emailOtp} onChange={(e) => setEmailOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} maxLength={6} autoFocus
                     className="w-full h-12 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 text-center text-2xl tracking-[0.5em] font-mono focus:outline-hidden focus:ring-2 focus:ring-cyan-600 pl-12" placeholder="000000" />
                 </div>
                 <button onClick={handleEmailVerifyOtp} disabled={emailLoading || emailOtp.length !== 6}
@@ -307,13 +321,13 @@ const ProfileSettings = () => {
 
       {/* ═══ 2FA Toggle Modal ════════════════════════════════════════════════ */}
       {tfaModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setTfaModal(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={closeTfaModal} role="dialog" aria-modal="true" aria-labelledby="tfa-modal-title">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
           <div className="relative bg-white dark:bg-neutral-800 rounded-2xl shadow-2xl max-w-sm w-full p-6 animate-slide-up" onClick={e => e.stopPropagation()}>
-            <button onClick={() => setTfaModal(false)} className="absolute top-4 right-4 text-neutral-400 hover:text-neutral-600"><X className="w-5 h-5" /></button>
+            <button type="button" onClick={closeTfaModal} aria-label="Close" className="absolute top-4 right-4 text-neutral-400 hover:text-neutral-600"><X className="w-5 h-5" /></button>
             <div className="flex items-center gap-3 mb-4">
               <Shield className="w-6 h-6 text-cyan-600" />
-              <h3 className="text-lg font-bold text-neutral-900 dark:text-white">{user.twoFactorEnabled ? 'Disable' : 'Enable'} Two-Step Verification</h3>
+              <h3 id="tfa-modal-title" className="text-lg font-bold text-neutral-900 dark:text-white">{user.twoFactorEnabled ? 'Disable' : 'Enable'} Two-Step Verification</h3>
             </div>
             <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-4">Enter your password to confirm this change.</p>
             {tfaError && (
@@ -323,7 +337,7 @@ const ProfileSettings = () => {
             )}
             <div className="relative mb-4">
               <Lock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
-              <input type="password" value={tfaPassword} onChange={(e) => { setTfaPassword(e.target.value); setTfaError(''); }} autoFocus
+              <input type="password" aria-label="Password" value={tfaPassword} onChange={(e) => { setTfaPassword(e.target.value); setTfaError(''); }} autoFocus
                 className="w-full h-11 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-hidden focus:ring-2 focus:ring-cyan-600 pl-12"
                 placeholder="Enter your password" />
             </div>
@@ -337,13 +351,13 @@ const ProfileSettings = () => {
 
       {/* ═══ Delete Account Modal ══════════════════════════════════════════════ */}
       {deleteModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => { setDeleteModal(false); setDeleteError(''); setDeletePassword(''); }}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={closeDeleteModal} role="dialog" aria-modal="true" aria-labelledby="delete-modal-title">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
           <div className="relative bg-white dark:bg-neutral-800 rounded-2xl shadow-2xl max-w-sm w-full p-6 animate-slide-up" onClick={e => e.stopPropagation()}>
-            <button onClick={() => { setDeleteModal(false); setDeleteError(''); setDeletePassword(''); }} className="absolute top-4 right-4 text-neutral-400 hover:text-neutral-600"><X className="w-5 h-5" /></button>
+            <button type="button" onClick={closeDeleteModal} aria-label="Close" className="absolute top-4 right-4 text-neutral-400 hover:text-neutral-600"><X className="w-5 h-5" /></button>
             <div className="flex items-center gap-3 mb-4">
               <AlertCircle className="w-6 h-6 text-red-600" />
-              <h3 className="text-lg font-bold text-neutral-900 dark:text-white">Delete Account</h3>
+              <h3 id="delete-modal-title" className="text-lg font-bold text-neutral-900 dark:text-white">Delete Account</h3>
             </div>
             <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-4">Are you sure you want to delete your profile? This action cannot be undone. Enter your password to confirm.</p>
             {deleteError && (
@@ -353,7 +367,7 @@ const ProfileSettings = () => {
             )}
             <div className="relative mb-4">
               <Lock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
-              <input type="password" value={deletePassword} onChange={(e) => { setDeletePassword(e.target.value); setDeleteError(''); }} autoFocus
+              <input type="password" aria-label="Password" value={deletePassword} onChange={(e) => { setDeletePassword(e.target.value); setDeleteError(''); }} autoFocus
                 className="w-full h-11 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-hidden focus:ring-2 focus:ring-red-600 pl-12"
                 placeholder="Enter your password" />
             </div>

@@ -15,7 +15,7 @@ import {
   Heart
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { getUser, getPropertiesByOwner, updateProfile, createUserRating, canRateUser, canViewTenantContact, getMyFavourites, addFavourite, removeFavourite, createConversation } from '../utils/api';
+import { getUser, getPropertiesByOwner, createUserRating, canRateUser, canViewTenantContact, getMyFavourites, addFavourite, removeFavourite, createConversation } from '../utils/api';
 
 const UserProfile = () => {
   const { id } = useParams();
@@ -48,27 +48,35 @@ const UserProfile = () => {
 
   useEffect(() => {
     if (id) {
-      fetchUserProfile();
+      // Reset per-profile state and ignore responses for a previous id
+      let cancelled = false;
+      setError('');
+      setShowRatingForm(false);
+      fetchUserProfile(() => cancelled);
+      return () => { cancelled = true; };
     }
   }, [id]);
 
   // Initialize owner favourite state when viewing an owner and tenant is logged in
   useEffect(() => {
+    let cancelled = false;
     const initFav = async () => {
       try {
         if (!currentUser || currentUser.role !== 'tenant') { setIsOwnerFavourited(false); return; }
         if (!user || user.role !== 'owner') { setIsOwnerFavourited(false); return; }
         if (!id) { setIsOwnerFavourited(false); return; }
         const res = await getMyFavourites();
+        if (cancelled) return;
         const favs = res.data?.favourites || [];
         const has = favs.some(f => f.itemType === 'owner' && String(f.itemId) === String(id));
         setIsOwnerFavourited(has);
       } catch {
-        setIsOwnerFavourited(false);
+        if (!cancelled) setIsOwnerFavourited(false);
       }
     };
     initFav();
-  }, [currentUser?.id, currentUser?.role, user?.role, id]);
+    return () => { cancelled = true; };
+  }, [curId, currentUser?.role, user?.role, id]);
 
   const toggleOwnerFavourite = async () => {
     if (!currentUser) { navigate('/login'); return; }
@@ -91,12 +99,13 @@ const UserProfile = () => {
     }
   };
 
-  const fetchUserProfile = async () => {
+  const fetchUserProfile = async (isCancelled = () => false) => {
     try {
       setLoading(true);
       
       // Always fetch to get fresh data and rating summary
       const response = await getUser(id);
+      if (isCancelled()) return;
       const fetchedUser = response.data.user;
 
       // Set profile fields
@@ -126,55 +135,61 @@ const UserProfile = () => {
         try {
           const ownerId = fetchedUser._id || fetchedUser.id;
           const propertiesResponse = await getPropertiesByOwner(ownerId);
-          setProperties(propertiesResponse.data.properties || []);
+          if (!isCancelled()) setProperties(propertiesResponse.data.properties || []);
         } catch (error) {
           console.error('Error fetching properties:', error);
-          setProperties([]);
+          if (!isCancelled()) setProperties([]);
         }
       } else {
         setProperties([]);
       }
 
     } catch (error) {
+      if (isCancelled()) return;
       setError('Failed to fetch user profile');
       console.error('Error fetching user profile:', error);
     } finally {
-      setLoading(false);
+      if (!isCancelled()) setLoading(false);
     }
   };
 
   // Check visibility for tenant's phone number
   useEffect(() => {
+    let cancelled = false;
     const check = async () => {
       try {
         if (!currentUser || !id) { setCanViewPhone(false); return; }
         if (String(curId) === String(id)) { setCanViewPhone(true); return; }
         if (user?.role !== 'tenant') { setCanViewPhone(false); return; }
         const res = await canViewTenantContact(id);
-        setCanViewPhone(!!res.data?.canView);
+        if (!cancelled) setCanViewPhone(!!res.data?.canView);
       } catch {
-        setCanViewPhone(false);
+        if (!cancelled) setCanViewPhone(false);
       }
     };
     check();
+    return () => { cancelled = true; };
   }, [id, curId, user?.role]);
 
   // Check eligibility to rate when viewing someone else's profile
   useEffect(() => {
+    let cancelled = false;
     const check = async () => {
       try {
-        if (!currentUser || !id || (String(curId) === String(id))) {
+        // Context is the profile user's role: tenants rate owners, owners rate tenants
+        if (!currentUser || !id || (String(curId) === String(id)) || !['owner', 'tenant'].includes(user?.role)) {
           setCanRate(false);
           return;
         }
         const ctx = (user?.role === 'owner') ? 'owner' : 'tenant';
         const res = await canRateUser(id, ctx);
-        setCanRate(!!res.data?.canRate);
+        if (!cancelled) setCanRate(!!res.data?.canRate);
       } catch (e) {
-        setCanRate(false);
+        if (!cancelled) setCanRate(false);
       }
     };
     check();
+    return () => { cancelled = true; };
     // re-check when target user role or id/currentUser changes
   }, [id, curId, user?.role]);
 
@@ -190,6 +205,7 @@ const UserProfile = () => {
         context: (user?.role === 'owner') ? 'owner' : 'tenant',
       });
       setRateComment('');
+      setShowRatingForm(false);
       await fetchUserProfile();
       alert('Rating submitted');
     } catch (err) {
@@ -474,21 +490,21 @@ const UserProfile = () => {
                     >
                       View Rating Details
                     </button>
-                    {/* Evaluate Owner Button (tenants viewing owners) */}
-                    {!isEditing && currentUser && String(curId) !== String(id) && currentUser.role === 'tenant' && user.role === 'owner' && (
+                    {/* Evaluate button (tenants rating owners, owners rating tenants) when eligible */}
+                    {!isEditing && canRate && (
                       <button
                         onClick={() => setShowRatingForm(!showRatingForm)}
                         className="inline-flex items-center justify-center rounded-md bg-cyan-600 hover:bg-cyan-700 text-white py-1.5 px-3 text-xs font-medium transition-colors"
                       >
                         <Star className="h-3 w-3 mr-1" />
-                        {showRatingForm ? 'Cancel Evaluation' : 'Evaluate Owner'}
+                        {showRatingForm ? 'Cancel Evaluation' : `Evaluate ${user.role === 'owner' ? 'Owner' : 'Tenant'}`}
                       </button>
                     )}
                   </div>
                 </div>
 
                 {/* Rating Form (only if eligible to rate and form is shown) */}
-                {!isEditing && currentUser && String(curId) !== String(id) && showRatingForm && (
+                {!isEditing && canRate && showRatingForm && (
                   <div className="mt-6 border-t border-neutral-200 dark:border-neutral-700 pt-4">
                     <h3 className="text-sm font-semibold text-neutral-900 dark:text-white mb-2">
                       Evaluate {user.role === 'owner' ? 'Owner' : 'Tenant'}
@@ -562,9 +578,10 @@ const UserProfile = () => {
                         className="cursor-pointer border border-neutral-200 dark:border-neutral-700 rounded-lg overflow-hidden hover:shadow-md transition-shadow"
                       >
                         <img
-                          src={property.images?.[0] || '/api/placeholder/300/200'}
+                          src={property.images?.[0] || '/placeholder.svg'}
                           alt={property.title}
                           className="w-full h-40 object-cover"
+                          onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/placeholder.svg'; }}
                         />
                         <div className="p-4">
                           <h3 className="font-medium text-neutral-900 dark:text-white mb-1 line-clamp-1">
@@ -580,13 +597,13 @@ const UserProfile = () => {
                               <span className="text-xs font-normal text-neutral-500 dark:text-neutral-400">/month</span>
                             </div>
                             <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                              property.availability === 'Available'
+                              property.availabilityStatus === 'Available'
                                 ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-                                : property.availability === 'Booked'
+                                : property.availabilityStatus === 'Booked'
                                 ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
                                 : 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200'
                             }`}>
-                              {property.availability}
+                              {property.availabilityStatus}
                             </span>
                           </div>
                         </div>

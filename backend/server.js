@@ -7,7 +7,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import morgan from 'morgan';
-import rateLimit from 'express-rate-limit';
+import { authLimiter, apiLimiter } from './middleware/rateLimit.js';
 
 // Import routes
 import authRoutes from './routes/authRoutes.js';
@@ -38,13 +38,15 @@ app.use(helmet({
   contentSecurityPolicy: false
 }));
 
+// Behind a reverse proxy (e.g. Render) use the client IP from X-Forwarded-For,
+// otherwise every visitor shares one rate-limit bucket and IP binding is moot
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
+
 // Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 100,
-  message: 'Too many requests from this IP, please try again later.'
-});
-app.use('/api/auth', limiter);
+app.use('/api', apiLimiter);
+app.use('/api/auth', authLimiter);
 
 // CORS configuration
 const allowedOrigins = [
@@ -64,10 +66,11 @@ app.use(cors({
     if (process.env.NODE_ENV !== 'production') {
       return callback(null, true);
     }
-    return callback(new Error('Not allowed by CORS'));
+    // Unknown origins get no CORS headers (the browser blocks the response)
+    return callback(null, false);
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
@@ -137,6 +140,13 @@ app.use((req, res) => {
 // Global error handler (must be registered last)
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
+  // Client errors raised by body parsing (bad JSON, payload too large)
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({ message: 'Request is too large. Try smaller or fewer images.' });
+  }
+  if (err.type === 'entity.parse.failed') {
+    return res.status(400).json({ message: 'Malformed JSON in request body' });
+  }
   console.error(err.stack);
   res.status(err.status || 500).json({
     message: 'Something went wrong!',

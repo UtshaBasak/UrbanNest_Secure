@@ -1,37 +1,38 @@
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { AuthProvider } from './context/AuthContext';
+import React, { lazy, Suspense } from 'react';
+import { BrowserRouter as Router, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import Navbar from './components/Navbar';
-import Home from './pages/Home';
-import Properties from './pages/Properties';
-import PropertyDetails from './pages/PropertyDetails';
-import Login from './pages/Login';
-import Register from './pages/Register';
-import Dashboard from './pages/Dashboard';
-import UserProfile from './pages/UserProfile';
-import CreateProperty from './pages/CreateProperty';
-import EditProperty from './pages/EditProperty';
-import Owners from './pages/Owners';
-import Tenants from './pages/Tenants';
-import OwnerProperties from './pages/OwnerProperties';
-import Notifications from './pages/Notifications';
-import ProfileSettings from './pages/ProfileSettings';
-import ProfileStatus from './pages/ProfileStatus';
-import UserRatings from './pages/UserRatings';
-import PropertyReviews from './pages/PropertyReviews';
-import PropertyReviewNew from './pages/PropertyReviewNew';
-import Favourites from './pages/Favourites';
-import Compare from './pages/Compare';
-import Chat from './pages/Chat';
 import ProtectedRoute from './components/ProtectedRoute';
-import LeaveRequests from './pages/LeaveRequests';
-import LeaveRequestNew from './pages/LeaveRequestNew';
-import ForgotPassword from './pages/ForgotPassword';
-import ForceChangePassword from './pages/ForceChangePassword';
+import ErrorBoundary from './components/ErrorBoundary';
 
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from './context/AuthContext';
+// Pages are loaded on demand so each route ships only the code it needs
+const Home = lazy(() => import('./pages/Home'));
+const Properties = lazy(() => import('./pages/Properties'));
+const PropertyDetails = lazy(() => import('./pages/PropertyDetails'));
+const Login = lazy(() => import('./pages/Login'));
+const Register = lazy(() => import('./pages/Register'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const UserProfile = lazy(() => import('./pages/UserProfile'));
+const CreateProperty = lazy(() => import('./pages/CreateProperty'));
+const EditProperty = lazy(() => import('./pages/EditProperty'));
+const Owners = lazy(() => import('./pages/Owners'));
+const Tenants = lazy(() => import('./pages/Tenants'));
+const OwnerProperties = lazy(() => import('./pages/OwnerProperties'));
+const Notifications = lazy(() => import('./pages/Notifications'));
+const ProfileSettings = lazy(() => import('./pages/ProfileSettings'));
+const ProfileStatus = lazy(() => import('./pages/ProfileStatus'));
+const UserRatings = lazy(() => import('./pages/UserRatings'));
+const PropertyReviews = lazy(() => import('./pages/PropertyReviews'));
+const PropertyReviewNew = lazy(() => import('./pages/PropertyReviewNew'));
+const Favourites = lazy(() => import('./pages/Favourites'));
+const Compare = lazy(() => import('./pages/Compare'));
+const Chat = lazy(() => import('./pages/Chat'));
+const LeaveRequests = lazy(() => import('./pages/LeaveRequests'));
+const LeaveRequestNew = lazy(() => import('./pages/LeaveRequestNew'));
+const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
+const ForceChangePassword = lazy(() => import('./pages/ForceChangePassword'));
+const NotFound = lazy(() => import('./pages/NotFound'));
 
 // Redirects users with expired passwords to the force-change screen
 function PasswordExpiryGuard({ children }) {
@@ -45,6 +46,20 @@ function PasswordExpiryGuard({ children }) {
   return children;
 }
 
+function PageLoader() {
+  return (
+    <div className="flex justify-center items-center min-h-[50vh]" role="status" aria-label="Loading">
+      <div className="spinner text-primary-600" />
+    </div>
+  );
+}
+
+// Resets the error boundary when the user navigates to another route
+function RouteErrorBoundary({ children }) {
+  const location = useLocation();
+  return <ErrorBoundary resetKey={location.pathname}>{children}</ErrorBoundary>;
+}
+
 function App() {
   return (
     <ThemeProvider>
@@ -54,6 +69,8 @@ function App() {
             <PasswordExpiryGuard>
               <Navbar />
               <main className="pt-20">
+                <RouteErrorBoundary>
+                <Suspense fallback={<PageLoader />}>
                 <Routes>
                 <Route path="/compare" element={<Compare />} />
                 <Route path="/" element={<Home />} />
@@ -163,7 +180,10 @@ function App() {
                     </ProtectedRoute>
                   }
                 />
+                <Route path="*" element={<NotFound />} />
               </Routes>
+                </Suspense>
+                </RouteErrorBoundary>
               </main>
             </PasswordExpiryGuard>
           </div>

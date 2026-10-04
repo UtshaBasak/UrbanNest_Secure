@@ -5,6 +5,8 @@
  * purposes only. For production use a vetted crypto library.
  */
 
+import { randomBytes } from './random.js';
+
 const P = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2Fn;
 const A = 0n;
 const B = 7n;
@@ -52,15 +54,16 @@ function scalarMult(k, Pt) {
   return R;
 }
 
+// Order of the secp256k1 base point G
+const N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141n;
+
+// Private scalars must be uniform in [1, N-1] and unpredictable.
+// 64 extra bits before the reduction keep the modulo bias negligible.
 function randomBigIntBelow(nBits) {
-  const bytes = Math.ceil(nBits / 8);
-  const arr = new Uint8Array(bytes);
-  for (let i = 0; i < bytes; i++) arr[i] = Math.floor(Math.random() * 256);
+  const arr = randomBytes(Math.ceil(nBits / 8) + 8);
   let r = 0n;
   for (const b of arr) r = (r << 8n) | BigInt(b);
-  // reduce mod (P-1) and ensure >=1
-  const scalar = (r % (P - 1n)) + 1n;
-  return scalar;
+  return (r % (N - 1n)) + 1n;
 }
 
 export function generateECCKeyPair() {

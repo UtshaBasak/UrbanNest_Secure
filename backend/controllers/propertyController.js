@@ -3,7 +3,7 @@
 // @access Private
 export const getSuggestedProperties = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user._id;
     // Get user with favorites
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: 'User not found' });
@@ -32,8 +32,9 @@ export const getSuggestedProperties = async (req, res) => {
         _id: { $nin: activityPropertyIds },
       })
         .sort({ createdAt: -1 })
+        .slice('images', LIST_IMAGE_SLICE)
         .limit(8)
-        .populate('owner', 'nameEncrypted emailEncrypted phoneEncrypted profileImage isEncrypted');
+        .populate('owner', OWNER_FIELDS);
     }
 
     // If not enough, fill with recent properties
@@ -43,21 +44,19 @@ export const getSuggestedProperties = async (req, res) => {
         _id: { $nin: [...activityPropertyIds, ...suggested.map(p => p._id.toString())] }
       })
         .sort({ createdAt: -1 })
+        .slice('images', LIST_IMAGE_SLICE)
         .limit(8 - suggested.length)
-        .populate('owner', 'nameEncrypted emailEncrypted phoneEncrypted profileImage isEncrypted');
+        .populate('owner', OWNER_FIELDS);
       suggested = [...suggested, ...more];
     }
 
     // Add rating aggregation for all suggested properties
     const suggestedIds = suggested.map(p => p._id);
-    const reviewAggregation = await Review.aggregate([
-      { $match: { property: { $in: suggestedIds } } },
-      { $group: { _id: '$property', averageRating: { $avg: '$rating' }, totalReviews: { $sum: 1 } } }
-    ]);
+    const reviewAggregation = await ratingStatsFor(suggestedIds);
 
     const ratingMap = new Map(reviewAggregation.map(r => [String(r._id), r]));
     suggested = suggested.map(p => ({
-      ...p.toJSON(),
+      ...sanitizeForViewer(p.toJSON(), req.user),
       averageRating: ratingMap.get(String(p._id))?.averageRating || 0,
       totalReviews: ratingMap.get(String(p._id))?.totalReviews || 0
     }));
@@ -75,27 +74,84 @@ import Booking from '../models/Booking.js';
 import Review from '../models/Review.js';
 import Notification from '../models/Notification.js';
 import LeaveRequest from '../models/LeaveRequest.js';
+import { randomString } from '../crypto/random.js';
+import { parsePagination, asString } from '../utils/validation.js';
+import { getCachedList, invalidatePropertyCache } from '../utils/propertyCache.js';
+
+// List views only render the cover image; sending every base64 image made
+// listing responses several megabytes
+const LIST_IMAGE_SLICE = 1;
+
+const OWNER_FIELDS = 'nameEncrypted emailEncrypted phoneEncrypted profileImage isEncrypted';
+
+// Ratings shown on listings use public reviews only, matching the review page
+const ratingStatsFor = (propertyIds) => Review.aggregate([
+  { $match: { property: { $in: propertyIds }, isPublic: true } },
+  { $group: { _id: '$property', averageRating: { $avg: '$rating' }, totalReviews: { $sum: 1 } } }
+]);
+
+// Hide contact details from anonymous visitors and the current tenant's name
+// from everyone except the property owner and admins.
+const sanitizeForViewer = (property, viewer) => {
+  const p = { ...property };
+  if (!viewer && p.owner && typeof p.owner === 'object') {
+    const { email, phone, ...publicOwner } = p.owner;
+    p.owner = publicOwner;
+  }
+  const ownerId = String(p.owner?._id || p.owner || '');
+  const canSeeTenant = viewer && (viewer.role === 'admin' || String(viewer._id) === ownerId);
+  if (!canSeeTenant) delete p.currentTenant;
+  return p;
+};
+
+// Fields a client may set on a property; everything else (owner, propertyId,
+// encrypted blobs, timestamps) is controlled by the server.
+const EDITABLE_FIELDS = ['title', 'description', 'location', 'latitude', 'longitude',
+  'price', 'bedrooms', 'bathrooms', 'area', 'size', 'propertyType', 'type',
+  'images', 'amenities', 'availabilityStatus', 'isActive'];
+
+const pickEditable = (body) => {
+  const data = {};
+  for (const field of EDITABLE_FIELDS) {
+    if (body[field] !== undefined) data[field] = body[field];
+  }
+  if (body.coordinates && typeof body.coordinates === 'object') {
+    data.coordinates = {
+      latitude: body.coordinates.latitude,
+      longitude: body.coordinates.longitude
+    };
+  }
+  return data;
+};
+
+const validationFailed = (req, res) => {
+  const errors = validationResult(req);
+  if (errors.isEmpty()) return false;
+  res.status(400).json({ message: errors.array()[0].msg, errors: errors.array() });
+  return true;
+};
 
 // @desc Get all properties with filters
 // @route GET /api/properties
 // @access Public
 export const getProperties = async (req, res) => {
   try {
-    const {
-      page = 1,
-      limit = 12,
-      minPrice,
-      maxPrice,
-      bedrooms,
-      propertyType,
-      availabilityStatus = '',
-      sortBy = 'createdAt',
-      sortOrder = 'desc',
-      search,
-      lat,
-      lng,
-      radius = 10 // km
-    } = req.query;
+    // Query values can arrive as arrays (?a=1&a=2); only accept strings
+    const q = (name, fallback = '') => asString(req.query[name], fallback);
+    const minPrice = q('minPrice');
+    const maxPrice = q('maxPrice');
+    const bedrooms = q('bedrooms');
+    const propertyType = q('propertyType');
+    const type = q('type');
+    const availabilityStatus = q('availabilityStatus');
+    const sortBy = q('sortBy', 'createdAt');
+    const sortOrder = q('sortOrder', 'desc');
+    const search = q('search');
+    const lat = q('lat');
+    const lng = q('lng');
+    const radius = q('radius', '10'); // km
+    // The listing page loads everything for client-side filtering, so allow large pages
+    const { page: pageNum, limit: limitNum, skip } = parsePagination(req.query, { defaultLimit: 12, maxLimit: 1000 });
 
     // Since property fields are now encrypted, most filters must be applied post-query.
     // Only non-encrypted fields (isActive, availabilityStatus) can be filtered in DB.
@@ -109,12 +165,16 @@ export const getProperties = async (req, res) => {
     sortOptions[actualSortBy] = sortOrder === 'desc' ? -1 : 1;
 
     // Fetch all matching docs, decrypt in memory, then apply filters + pagination
-    let allProperties = await Property.find(query)
-      .populate('owner', 'nameEncrypted emailEncrypted phoneEncrypted profileImage isEncrypted')
-      .sort(sortOptions);
-
-    // Decrypt all properties to plain objects
-    let decryptedProperties = allProperties.map(p => p.toJSON());
+    // Decrypted plain objects are cached briefly and shared between requests,
+    // so they must not be mutated below
+    const cacheKey = JSON.stringify({ query, sortOptions });
+    let decryptedProperties = await getCachedList(cacheKey, async () => {
+      const docs = await Property.find(query)
+        .slice('images', LIST_IMAGE_SLICE)
+        .populate('owner', OWNER_FIELDS)
+        .sort(sortOptions);
+      return docs.map(p => p.toJSON());
+    });
 
     // Apply post-decryption filters
     if (minPrice || maxPrice) {
@@ -131,8 +191,8 @@ export const getProperties = async (req, res) => {
     if (propertyType) {
       decryptedProperties = decryptedProperties.filter(p => p.propertyType === propertyType);
     }
-    if (req.query.type) {
-      decryptedProperties = decryptedProperties.filter(p => p.type === req.query.type);
+    if (type) {
+      decryptedProperties = decryptedProperties.filter(p => p.type === type);
     }
 
     // Search in decrypted title, location, description
@@ -159,9 +219,7 @@ export const getProperties = async (req, res) => {
     }
 
     const total = decryptedProperties.length;
-    const pageNum = Number(page);
-    const limitNum = Number(limit);
-    const paged = decryptedProperties.slice((pageNum - 1) * limitNum, pageNum * limitNum);
+    const paged = decryptedProperties.slice(skip, skip + limitNum);
 
     // Attach currentTenant if active booking exists
     const now = new Date();
@@ -199,21 +257,18 @@ export const getProperties = async (req, res) => {
       const b = byProp.get(p._id.toString());
       if (b && b.tenant) {
         const tenantDecrypted = typeof b.tenant.toJSON === 'function' ? b.tenant.toJSON() : b.tenant;
-        p.currentTenant = { id: b.tenant._id, name: tenantDecrypted.name || '[Encrypted]' };
+        return { ...p, currentTenant: { id: b.tenant._id, name: tenantDecrypted.name || '[Encrypted]' } };
       }
       return p;
     });
 
     // Add rating aggregation for all properties
     const propertyIds = properties.map(p => p._id);
-    const reviewAggregation = await Review.aggregate([
-      { $match: { property: { $in: propertyIds } } },
-      { $group: { _id: '$property', averageRating: { $avg: '$rating' }, totalReviews: { $sum: 1 } } }
-    ]);
+    const reviewAggregation = await ratingStatsFor(propertyIds);
 
     const ratingMap = new Map(reviewAggregation.map(r => [String(r._id), r]));
     properties = properties.map(p => ({
-      ...p,
+      ...sanitizeForViewer(p, req.user),
       averageRating: ratingMap.get(String(p._id))?.averageRating || 0,
       totalReviews: ratingMap.get(String(p._id))?.totalReviews || 0
     }));
@@ -241,22 +296,27 @@ export const getProperties = async (req, res) => {
 // @access Public
 export const getTopRatedProperties = async (req, res) => {
   try {
-    const { limit = 6, minReviews = 1 } = req.query;
+    const { limit } = parsePagination(req.query, { defaultLimit: 6, maxLimit: 50 });
+    const minReviews = Math.max(1, parseInt(req.query.minReviews, 10) || 1);
 
-    const agg = await Review.aggregate([
+    // Rank first, then drop inactive listings before applying the limit
+    const ranked = await Review.aggregate([
+      { $match: { isPublic: true } },
       { $group: { _id: '$property', averageRating: { $avg: '$rating' }, totalReviews: { $sum: 1 } } },
-      { $match: { totalReviews: { $gte: Number(minReviews) } } },
-      { $sort: { averageRating: -1, totalReviews: -1 } },
-      { $limit: Number(limit) }
+      { $match: { totalReviews: { $gte: minReviews } } },
+      { $sort: { averageRating: -1, totalReviews: -1 } }
     ]);
+    const activeIds = new Set((await Property.find({ _id: { $in: ranked.map(a => a._id) }, isActive: true }).distinct('_id')).map(String));
+    const agg = ranked.filter(a => activeIds.has(String(a._id))).slice(0, limit);
 
     const ids = agg.map(a => a._id);
     const props = await Property.find({ _id: { $in: ids }, isActive: true })
-      .populate('owner', 'nameEncrypted emailEncrypted phoneEncrypted profileImage isEncrypted');
+      .slice('images', LIST_IMAGE_SLICE)
+      .populate('owner', OWNER_FIELDS);
 
     const map = new Map(agg.map(a => [String(a._id), a]));
     const properties = props.map(p => ({
-      ...p.toJSON(),
+      ...sanitizeForViewer(p.toJSON(), req.user),
       averageRating: map.get(String(p._id))?.averageRating || 0,
       totalReviews: map.get(String(p._id))?.totalReviews || 0
     }));
@@ -276,7 +336,7 @@ export const getTopRatedProperties = async (req, res) => {
 export const getProperty = async (req, res) => {
   try {
     const propertyDoc = await Property.findById(req.params.id)
-      .populate('owner', 'nameEncrypted emailEncrypted phoneEncrypted profileImage isEncrypted');
+      .populate('owner', OWNER_FIELDS);
 
     if (!propertyDoc) {
       return res.status(404).json({ message: 'Property not found' });
@@ -307,17 +367,14 @@ export const getProperty = async (req, res) => {
     }
 
     // Add rating information
-    const reviewAggregation = await Review.aggregate([
-      { $match: { property: propertyDoc._id } },
-      { $group: { _id: '$property', averageRating: { $avg: '$rating' }, totalReviews: { $sum: 1 } } }
-    ]);
+    const reviewAggregation = await ratingStatsFor([propertyDoc._id]);
 
     property.averageRating = reviewAggregation[0]?.averageRating || 0;
     property.totalReviews = reviewAggregation[0]?.totalReviews || 0;
 
     res.json({
       data: {
-        property
+        property: sanitizeForViewer(property, req.user)
       }
     });
 
@@ -332,8 +389,8 @@ export const getProperty = async (req, res) => {
 // @access Public
 export const getPropertyByPropertyId = async (req, res) => {
   try {
-    const propertyDoc = await Property.findOne({ propertyId: req.params.propertyId })
-      .populate('owner', 'nameEncrypted emailEncrypted phoneEncrypted profileImage isEncrypted');
+    const propertyDoc = await Property.findOne({ propertyId: asString(req.params.propertyId) })
+      .populate('owner', OWNER_FIELDS);
 
     if (!propertyDoc) {
       return res.status(404).json({ message: 'Property not found' });
@@ -364,17 +421,14 @@ export const getPropertyByPropertyId = async (req, res) => {
     }
 
     // Add rating information
-    const reviewAggregation = await Review.aggregate([
-      { $match: { property: propertyDoc._id } },
-      { $group: { _id: '$property', averageRating: { $avg: '$rating' }, totalReviews: { $sum: 1 } } }
-    ]);
+    const reviewAggregation = await ratingStatsFor([propertyDoc._id]);
 
     property.averageRating = reviewAggregation[0]?.averageRating || 0;
     property.totalReviews = reviewAggregation[0]?.totalReviews || 0;
 
     res.json({
       data: {
-        property
+        property: sanitizeForViewer(property, req.user)
       }
     });
 
@@ -391,10 +445,7 @@ const generateUniquePropertyId = async () => {
   let isUnique = false;
   
   while (!isUnique) {
-    propertyId = '';
-    for (let i = 0; i < 8; i++) {
-      propertyId += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
+    propertyId = randomString(8, chars);
     
     // Check if this ID already exists
     const existingProperty = await Property.findOne({ propertyId });
@@ -411,22 +462,23 @@ const generateUniquePropertyId = async () => {
 // @access Private (Owner, Admin)
 export const createProperty = async (req, res) => {
   try {
-    // Relaxed validation: accept payload as-is; user verification is handled via auth middleware
+    if (validationFailed(req, res)) return;
 
     // Generate unique property ID
     const propertyId = await generateUniquePropertyId();
 
     const propertyData = {
-      ...req.body,
+      ...pickEditable(req.body),
       propertyId,
       owner: req.user._id
     };
 
     const property = new Property(propertyData);
     await property.save();
+    invalidatePropertyCache();
 
     const populatedProperty = await Property.findById(property._id)
-      .populate('owner', 'nameEncrypted emailEncrypted phoneEncrypted profileImage isEncrypted');
+      .populate('owner', OWNER_FIELDS);
 
     res.status(201).json({
       message: 'Property created successfully',
@@ -437,6 +489,9 @@ export const createProperty = async (req, res) => {
 
   } catch (error) {
     console.error('Create property error:', error);
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({ message: error.message });
+    }
     res.status(500).json({ message: 'Server error while creating property' });
   }
 };
@@ -446,7 +501,7 @@ export const createProperty = async (req, res) => {
 // @access Private (Owner of property, Admin)
 export const updateProperty = async (req, res) => {
   try {
-    // Relaxed validation: accept payload updates as-is; user/role verification remains enforced
+    if (validationFailed(req, res)) return;
 
     const property = await Property.findById(req.params.id);
 
@@ -461,25 +516,13 @@ export const updateProperty = async (req, res) => {
 
     // For encrypted updates, we need to set fields on the document and save
     // (not use findByIdAndUpdate, which bypasses pre-save hooks)
-    const updateFields = ['title', 'description', 'location', 'latitude', 'longitude',
-      'price', 'bedrooms', 'bathrooms', 'area', 'size', 'propertyType', 'type',
-      'images', 'amenities', 'availabilityStatus', 'isActive'];
-
-    updateFields.forEach(field => {
-      if (req.body[field] !== undefined) {
-        property[field] = req.body[field];
-      }
-    });
-
-    // Handle coordinates sub-object
-    if (req.body.coordinates) {
-      property.coordinates = req.body.coordinates;
-    }
+    Object.assign(property, pickEditable(req.body));
 
     await property.save();
+    invalidatePropertyCache();
 
     const updatedProperty = await Property.findById(req.params.id)
-      .populate('owner', 'nameEncrypted emailEncrypted phoneEncrypted profileImage isEncrypted');
+      .populate('owner', OWNER_FIELDS);
 
     res.json({
       message: 'Property updated successfully',
@@ -490,6 +533,9 @@ export const updateProperty = async (req, res) => {
 
   } catch (error) {
     console.error('Update property error:', error);
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({ message: error.message });
+    }
     res.status(500).json({ message: 'Server error while updating property' });
   }
 };
@@ -511,6 +557,7 @@ export const deleteProperty = async (req, res) => {
     }
 
     const propertyId = property._id;
+    const bookingIds = await Booking.find({ property: propertyId }).distinct('_id');
 
     // ── Cascade delete all related data ─────────────────────────────────────
     await Promise.all([
@@ -521,7 +568,7 @@ export const deleteProperty = async (req, res) => {
       // Delete all notifications that reference this property
       Notification.deleteMany({ 'meta.propertyId': propertyId }),
       // Delete leave requests tied to this property
-      LeaveRequest.deleteMany({ property: propertyId }),
+      LeaveRequest.deleteMany({ booking: { $in: bookingIds } }),
       // Remove property from every user's favourites array
       User.updateMany(
         { 'favourites.itemId': propertyId },
@@ -531,6 +578,7 @@ export const deleteProperty = async (req, res) => {
 
     // Hard delete the property itself
     await Property.findByIdAndDelete(propertyId);
+    invalidatePropertyCache();
 
     res.json({ message: 'Property and all related data deleted successfully' });
 
@@ -546,29 +594,25 @@ export const deleteProperty = async (req, res) => {
 export const getPropertiesByOwner = async (req, res) => {
   try {
     const { ownerId } = req.params;
-    const { page = 1, limit = 12 } = req.query;
+    const { page: pageNum, limit: limitNum, skip } = parsePagination(req.query, { defaultLimit: 12 });
 
     const allProperties = await Property.find({ 
       owner: ownerId, 
       isActive: true 
     })
-      .populate('owner', 'nameEncrypted emailEncrypted phoneEncrypted profileImage isEncrypted')
+      .slice('images', LIST_IMAGE_SLICE)
+      .populate('owner', OWNER_FIELDS)
       .sort({ createdAt: -1 });
 
     const total = allProperties.length;
-    const pageNum = Number(page);
-    const limitNum = Number(limit);
 
     // Decrypt and paginate
-    const decrypted = allProperties.map(p => p.toJSON());
-    const paged = decrypted.slice((pageNum - 1) * limitNum, pageNum * limitNum);
+    const decrypted = allProperties.map(p => sanitizeForViewer(p.toJSON(), req.user));
+    const paged = decrypted.slice(skip, skip + limitNum);
 
     // Add rating aggregation for owner's properties
     const propertyIds = paged.map(p => p._id);
-    const reviewAggregation = await Review.aggregate([
-      { $match: { property: { $in: propertyIds } } },
-      { $group: { _id: '$property', averageRating: { $avg: '$rating' }, totalReviews: { $sum: 1 } } }
-    ]);
+    const reviewAggregation = await ratingStatsFor(propertyIds);
 
     const ratingMap = new Map(reviewAggregation.map(r => [String(r._id), r]));
     const propertiesWithRatings = paged.map(p => ({

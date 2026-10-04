@@ -17,6 +17,7 @@ const Navbar = () => {
   const searchRef = useRef(null);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const profileRef = useRef(null);
+  const menuToggleRef = useRef(null);
   // Scroll-aware navbar state
   const [isScrollingDown, setIsScrollingDown] = useState(false);
   const [showFloatingMenu, setShowFloatingMenu] = useState(false);
@@ -50,7 +51,11 @@ const Navbar = () => {
   // Close mobile menu when clicking outside
   useEffect(() => {
     const handleGlobalDown = (event) => {
-      if (isMenuOpen && !event.target.closest('.mobile-menu')) {
+      if (
+        isMenuOpen &&
+        !event.target.closest('.mobile-menu') &&
+        !menuToggleRef.current?.contains(event.target)
+      ) {
         setIsMenuOpen(false);
       }
       if (showProfileMenu && profileRef.current && !profileRef.current.contains(event.target)) {
@@ -280,6 +285,7 @@ const Navbar = () => {
             {/* Theme Toggle */}
             <button
               onClick={toggleTheme}
+              aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
               className="p-2 rounded-full text-neutral-700 dark:text-neutral-300 hover:bg-cyan-100 dark:hover:bg-cyan-900/50 transition-all duration-200"
               title={isDark ? 'Light Mode' : 'Dark Mode'}
             >
@@ -304,6 +310,7 @@ const Navbar = () => {
                     onClick={() => setShowProfileMenu((v) => !v)}
                     className="flex items-center justify-center h-9 w-9 rounded-full border border-white/30 dark:border-neutral-700 overflow-hidden bg-neutral-200 dark:bg-neutral-700 hover:ring-2 hover:ring-cyan-400/60"
                     title={user?.name || 'Profile'}
+                    aria-label="Open profile menu"
                     aria-haspopup="menu"
                     aria-expanded={showProfileMenu}
                   >
@@ -386,7 +393,10 @@ const Navbar = () => {
 
           {/* Mobile Menu Button */}
           <button
+            ref={menuToggleRef}
             onClick={() => setIsMenuOpen(!isMenuOpen)}
+            aria-expanded={isMenuOpen}
+            aria-label={isMenuOpen ? 'Close menu' : 'Open menu'}
             className="md:hidden px-3 py-2 rounded-full text-sm font-medium text-neutral-700 dark:text-neutral-300 hover:bg-cyan-100 dark:hover:bg-cyan-900/50 transition-all duration-200"
           >
             {isMenuOpen ? 'Close' : 'Menu'}
@@ -468,6 +478,14 @@ const Navbar = () => {
               <input
                 type="text"
                 placeholder="Search..."
+                aria-label="Search properties"
+                onKeyDown={(e) => {
+                  const q = e.currentTarget.value.trim();
+                  if (e.key === 'Enter' && q) {
+                    navigate(`/properties?search=${encodeURIComponent(q)}`);
+                    setIsMenuOpen(false);
+                  }
+                }}
                 className="w-full pl-4 pr-4 py-3 bg-neutral-100 dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 focus:outline-hidden focus:ring-2 focus:ring-primary-500"
               />
             </div>
@@ -488,13 +506,6 @@ const Navbar = () => {
               className="px-4 py-3 rounded-xl hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-all duration-200 font-medium"
             >
               Properties
-            </Link>
-            <Link
-              to="/map"
-              onClick={() => setIsMenuOpen(false)}
-              className="px-4 py-3 rounded-xl hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-all duration-200 font-medium"
-            >
-              Map
             </Link>
             {user && (
               <Link
@@ -587,6 +598,7 @@ const Navbar = () => {
               }}
               className="p-3 rounded-xl hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-all duration-200 w-full text-left"
               title={isDark ? 'Light Mode' : 'Dark Mode'}
+              aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
             >
               {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
             </button>

@@ -13,7 +13,10 @@ const Login = () => {
   const [error, setError] = useState('');
   const [show2FA, setShow2FA] = useState(false);
   const [otpCode, setOtpCode] = useState('');
-  const from = location.state?.from?.pathname || '/dashboard';
+  const fromLocation = location.state?.from;
+  const from = fromLocation?.pathname && fromLocation.pathname !== '/login'
+    ? `${fromLocation.pathname}${fromLocation.search || ''}`
+    : '/dashboard';
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -61,10 +64,10 @@ const Login = () => {
             )}
             <form onSubmit={handle2FASubmit} className="space-y-6">
               <div>
-                <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">Verification Code</label>
+                <label htmlFor="login-otp" className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">Verification Code</label>
                 <div className="relative">
                   <KeyRound className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
-                  <input type="text" value={otpCode} onChange={(e) => { setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6)); if (error) setError(''); }} maxLength={6} placeholder="000000" autoFocus
+                  <input type="text" id="login-otp" value={otpCode} onChange={(e) => { setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6)); if (error) setError(''); }} maxLength={6} placeholder="000000" autoFocus
                     className="w-full rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 px-4 py-3 pl-11 text-center text-2xl tracking-[0.5em] font-mono focus:outline-hidden focus:ring-2 focus:ring-cyan-500" />
                 </div>
               </div>
@@ -114,7 +117,7 @@ const Login = () => {
                 <input type={showPassword ? 'text' : 'password'} id="login-password" name="password" value={formData.password} onChange={handleChange} required autoComplete="new-password"
                   className="w-full rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 px-4 py-3 pl-11 pr-11 focus:outline-hidden focus:ring-2 focus:ring-primary-500"
                   placeholder="Enter your password" />
-                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 transform -translate-y-1/2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300">
+                <button type="button" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? 'Hide password' : 'Show password'} className="absolute right-3 top-1/2 transform -translate-y-1/2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300">
                   {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </div>

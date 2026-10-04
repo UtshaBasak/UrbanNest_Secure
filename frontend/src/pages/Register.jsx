@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { sendOtp, verifyOtp } from '../utils/api';
@@ -22,17 +22,23 @@ function checkPasswordRules(pw) {
 }
 
 function PasswordPolicyPopup({ open, onClose }) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="password-policy-title">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
       <div className="relative bg-white dark:bg-neutral-800 rounded-2xl shadow-2xl max-w-md w-full p-6 animate-slide-up" onClick={e => e.stopPropagation()}>
-        <button onClick={onClose} className="absolute top-4 right-4 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"><X className="w-5 h-5" /></button>
+        <button type="button" onClick={onClose} aria-label="Close" className="absolute top-4 right-4 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"><X className="w-5 h-5" /></button>
         <div className="flex items-center gap-3 mb-4">
           <div className="w-10 h-10 bg-cyan-100 dark:bg-cyan-900/40 rounded-full flex items-center justify-center">
             <ShieldCheck className="w-5 h-5 text-cyan-600" />
           </div>
-          <h3 className="text-lg font-bold text-neutral-900 dark:text-white">Password Policy</h3>
+          <h3 id="password-policy-title" className="text-lg font-bold text-neutral-900 dark:text-white">Password Policy</h3>
         </div>
         <div className="space-y-3 text-sm text-neutral-700 dark:text-neutral-300">
           <div className="p-3 bg-neutral-50 dark:bg-neutral-700/50 rounded-lg"><p className="font-semibold mb-1">🔑 Minimum Length</p><p>At least <strong>12–16 characters</strong>.</p></div>
@@ -57,7 +63,10 @@ const Register = () => {
   const [showPolicyPopup, setShowPolicyPopup] = useState(false);
   const [otpCode, setOtpCode] = useState('');
   const [otpSending, setOtpSending] = useState(false);
+  // Token returned by a successful OTP verification; reused if account creation fails afterwards
+  const [verificationToken, setVerificationToken] = useState(null);
 
+  const closePolicyPopup = useCallback(() => setShowPolicyPopup(false), []);
   const strength = useMemo(() => getPasswordStrength(formData.password), [formData.password]);
   const rules = useMemo(() => checkPasswordRules(formData.password), [formData.password]);
 
@@ -65,6 +74,8 @@ const Register = () => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
     if (errors[name]) setErrors(prev => ({ ...prev, [name]: '' }));
+    // A verification token is only valid for the email it was issued for
+    if (name === 'email') setVerificationToken(null);
   };
 
   const handleImageChange = (e) => {
@@ -107,9 +118,14 @@ const Register = () => {
     e.preventDefault();
     setLoading(true); setErrors({});
     try {
-      const result = await verifyOtp(formData.email, otpCode, 'signup');
+      let token = verificationToken;
+      if (!token) {
+        const result = await verifyOtp(formData.email, otpCode, 'signup');
+        token = result.verificationToken;
+        setVerificationToken(token);
+      }
       const { confirmPassword, ...registerData } = formData;
-      await register({ ...registerData, verificationToken: result.verificationToken });
+      await register({ ...registerData, verificationToken: token });
       navigate('/');
     } catch (error) {
       setErrors({ submit: error.message || 'Verification failed' });
@@ -118,7 +134,7 @@ const Register = () => {
 
   const handleResendOtp = async () => {
     setOtpSending(true);
-    try { await sendOtp(formData.email, 'signup'); }
+    try { await sendOtp(formData.email, 'signup'); setVerificationToken(null); }
     catch (error) { setErrors({ submit: error.message }); }
     finally { setOtpSending(false); }
   };
@@ -140,10 +156,10 @@ const Register = () => {
             )}
             <form onSubmit={handleOtpSubmit} className="space-y-6">
               <div>
-                <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">Verification Code</label>
+                <label htmlFor="register-otp" className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">Verification Code</label>
                 <div className="relative">
                   <KeyRound className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
-                  <input type="text" value={otpCode} onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))} maxLength={6} placeholder="000000" autoFocus
+                  <input type="text" id="register-otp" value={otpCode} onChange={(e) => { setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6)); setVerificationToken(null); }} maxLength={6} placeholder="000000" autoFocus
                     className="w-full h-14 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 text-center text-3xl tracking-[0.6em] font-mono focus:outline-hidden focus:ring-2 focus:ring-cyan-600 pl-12" />
                 </div>
               </div>
@@ -163,7 +179,7 @@ const Register = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center py-12 px-4 bg-linear-to-br from-primary-50 via-white to-secondary-50 dark:from-neutral-900 dark:via-neutral-800 dark:to-neutral-900">
-      <PasswordPolicyPopup open={showPolicyPopup} onClose={() => setShowPolicyPopup(false)} />
+      <PasswordPolicyPopup open={showPolicyPopup} onClose={closePolicyPopup} />
       <div className="w-full max-w-md">
         <div className="card p-8 animate-slide-up">
           <div className="text-center mb-8"><h1 className="text-3xl font-bold gradient-text mb-2">Create Your Account</h1></div>
@@ -174,61 +190,61 @@ const Register = () => {
           )}
           <form onSubmit={handleFormSubmit} className="space-y-5" autoComplete="off" noValidate>
             <div>
-              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">Full Name</label>
+              <label htmlFor="register-name" className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">Full Name</label>
               <div className="relative">
                 <User className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
-                <input type="text" name="name" value={formData.name} onChange={handleChange}
+                <input id="register-name" type="text" name="name" value={formData.name} onChange={handleChange}
                   className={`w-full h-11 rounded-sm border ${errors.name ? 'border-red-500' : 'border-neutral-300 dark:border-neutral-700'} bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-hidden focus:ring-2 focus:ring-cyan-600 pl-12 pr-4`}
                   placeholder="Enter your full name" />
               </div>
               {errors.name && <p className="text-red-500 text-xs mt-1">{errors.name}</p>}
             </div>
             <div>
-              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">Email Address</label>
+              <label htmlFor="register-email" className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">Email Address</label>
               <div className="relative">
                 <Mail className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
-                <input type="email" name="email" value={formData.email} onChange={handleChange}
+                <input id="register-email" type="email" name="email" value={formData.email} onChange={handleChange}
                   className={`w-full h-11 rounded-sm border ${errors.email ? 'border-red-500' : 'border-neutral-300 dark:border-neutral-700'} bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-hidden focus:ring-2 focus:ring-cyan-600 pl-12 pr-4`}
                   placeholder="Enter your email address" />
               </div>
               {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email}</p>}
             </div>
             <div>
-              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">Profile Picture (optional)</label>
+              <label htmlFor="register-image" className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">Profile Picture (optional)</label>
               <div className="flex items-center gap-4">
                 {formData.profileImage ? <img src={formData.profileImage} alt="Preview" className="h-12 w-12 rounded-full object-cover border" /> : <div className="h-12 w-12 rounded-full bg-neutral-200 dark:bg-neutral-700" />}
-                <input type="file" accept="image/*" onChange={handleImageChange} className="block w-full text-sm text-neutral-900 dark:text-neutral-200 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-cyan-50 file:text-cyan-700 hover:file:bg-cyan-100" />
+                <input id="register-image" type="file" accept="image/*" onChange={handleImageChange} className="block w-full text-sm text-neutral-900 dark:text-neutral-200 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-cyan-50 file:text-cyan-700 hover:file:bg-cyan-100" />
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">Phone Number</label>
+              <label htmlFor="register-phone" className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">Phone Number</label>
               <div className="relative">
                 <Phone className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
-                <input type="tel" name="phone" value={formData.phone} onChange={handleChange}
+                <input id="register-phone" type="tel" name="phone" value={formData.phone} onChange={handleChange}
                   className={`w-full h-11 rounded-sm border ${errors.phone ? 'border-red-500' : 'border-neutral-300 dark:border-neutral-700'} bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-hidden focus:ring-2 focus:ring-cyan-600 pl-12 pr-4`}
                   placeholder="Enter your phone number" />
               </div>
               {errors.phone && <p className="text-red-500 text-xs mt-1">{errors.phone}</p>}
             </div>
             <div>
-              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">Registering as</label>
-              <select name="role" value={formData.role} onChange={handleChange} className="w-full h-11 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-hidden focus:ring-2 focus:ring-cyan-600 px-3">
+              <label htmlFor="register-role" className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">Registering as</label>
+              <select id="register-role" name="role" value={formData.role} onChange={handleChange} className="w-full h-11 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-hidden focus:ring-2 focus:ring-cyan-600 px-3">
                 <option value="tenant">Tenant</option>
                 <option value="owner">Owner</option>
               </select>
             </div>
             <div>
               <div className="flex items-center gap-2 mb-2">
-                <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Password</label>
+                <label htmlFor="register-password" className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Password</label>
                 <span className="text-xs text-neutral-500">Password Rules</span>
-                <button type="button" onClick={() => setShowPolicyPopup(true)} className="text-neutral-400 hover:text-cyan-600"><HelpCircle className="w-4 h-4" /></button>
+                <button type="button" onClick={() => setShowPolicyPopup(true)} aria-label="Show password policy" className="text-neutral-400 hover:text-cyan-600"><HelpCircle className="w-4 h-4" /></button>
               </div>
               <div className="relative">
                 <Lock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
-                <input type={showPassword ? 'text' : 'password'} name="password" value={formData.password} onChange={handleChange} autoComplete="new-password"
+                <input id="register-password" type={showPassword ? 'text' : 'password'} name="password" value={formData.password} onChange={handleChange} autoComplete="new-password"
                   className={`w-full h-11 rounded-sm border ${errors.password ? 'border-red-500' : 'border-neutral-300 dark:border-neutral-700'} bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-hidden focus:ring-2 focus:ring-cyan-600 pl-12 pr-12`}
                   placeholder="Min. 12 characters" />
-                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400">
+                <button type="button" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? 'Hide password' : 'Show password'} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400">
                   {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </div>
@@ -254,13 +270,13 @@ const Register = () => {
               {errors.password && <p className="text-red-500 text-xs mt-1">{errors.password}</p>}
             </div>
             <div>
-              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">Confirm Password</label>
+              <label htmlFor="register-confirm-password" className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">Confirm Password</label>
               <div className="relative">
                 <Lock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
-                <input type={showConfirmPassword ? 'text' : 'password'} name="confirmPassword" value={formData.confirmPassword} onChange={handleChange} autoComplete="new-password"
+                <input id="register-confirm-password" type={showConfirmPassword ? 'text' : 'password'} name="confirmPassword" value={formData.confirmPassword} onChange={handleChange} autoComplete="new-password"
                   className={`w-full h-11 rounded-sm border ${errors.confirmPassword ? 'border-red-500' : 'border-neutral-300 dark:border-neutral-700'} bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-hidden focus:ring-2 focus:ring-cyan-600 pl-12 pr-12`}
                   placeholder="Confirm your password" />
-                <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400">
+                <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} aria-label={showConfirmPassword ? 'Hide password' : 'Show password'} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400">
                   {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </div>

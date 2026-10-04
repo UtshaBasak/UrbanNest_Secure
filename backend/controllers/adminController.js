@@ -2,13 +2,16 @@ import User from '../models/User.js';
 import Property from '../models/Property.js';
 import UserRating from '../models/UserRating.js';
 import mongoose from 'mongoose';
+import { invalidatePropertyCache } from '../utils/propertyCache.js';
+import { parsePagination, asString } from '../utils/validation.js';
 
 // @desc Get all owners with search functionality
 // @route GET /api/admin/owners
 // @access Private (Admin only)
 export const getOwners = async (req, res) => {
   try {
-    const { page = 1, limit = 20, search } = req.query;
+    const { page: pageNum, limit: limitNum } = parsePagination(req.query, { defaultLimit: 20 });
+    const search = asString(req.query.search).trim();
     const query = { role: 'owner', isActive: true };
 
     // Fetch all owners, decrypt, then filter in-memory
@@ -30,8 +33,6 @@ export const getOwners = async (req, res) => {
     }
 
     const total = decryptedOwners.length;
-    const pageNum = Number(page);
-    const limitNum = Number(limit);
     const paged = decryptedOwners.slice((pageNum - 1) * limitNum, pageNum * limitNum);
     const ownerIds = paged.map(o => o._id);
 
@@ -77,7 +78,8 @@ export const getOwners = async (req, res) => {
 // @access Private (Admin only)
 export const getTenants = async (req, res) => {
   try {
-    const { page = 1, limit = 20, search } = req.query;
+    const { page: pageNum, limit: limitNum } = parsePagination(req.query, { defaultLimit: 20 });
+    const search = asString(req.query.search).trim();
     const query = { role: 'tenant', isActive: true };
 
     // Fetch all tenants, decrypt, filter in-memory
@@ -97,8 +99,6 @@ export const getTenants = async (req, res) => {
     }
 
     const total = decryptedTenants.length;
-    const pageNum = Number(page);
-    const limitNum = Number(limit);
     const paged = decryptedTenants.slice((pageNum - 1) * limitNum, pageNum * limitNum);
     const tenantIds = paged.map(t => t._id);
 
@@ -136,34 +136,36 @@ export const getTenants = async (req, res) => {
 // @access Private (Admin only)
 export const getProperties = async (req, res) => {
   try {
-    const { page = 1, limit = 20, search } = req.query;
+    const { page: pageNum, limit: limitNum } = parsePagination(req.query, { defaultLimit: 20 });
+    const search = asString(req.query.search).trim();
     const query = { isActive: true };
 
-    if (search) {
-      query.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
-        { 'location.city': { $regex: search, $options: 'i' } },
-        { 'location.state': { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    const properties = await Property.find(query)
+    // Title, description and location are encrypted at rest, so decrypt first
+    // and search in memory (a database regex could never match)
+    const allProperties = (await Property.find(query)
+      .slice('images', 1)
       .populate('owner', 'nameEncrypted emailEncrypted phoneEncrypted profileImage isEncrypted')
-      .sort({ createdAt: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+      .sort({ createdAt: -1 }))
+      .map(p => p.toJSON());
 
-    const total = await Property.countDocuments(query);
+    const s = search.toLowerCase();
+    const matching = s
+      ? allProperties.filter(p =>
+          [p.title, p.description, p.location, p.propertyId, p.owner?.name, p.owner?.email]
+            .some(v => typeof v === 'string' && v.toLowerCase().includes(s)))
+      : allProperties;
+
+    const total = matching.length;
+    const properties = matching.slice((pageNum - 1) * limitNum, pageNum * limitNum);
 
     res.json({
       data: {
         properties,
         pagination: {
           total,
-          page: Number(page),
-          pages: Math.ceil(total / limit),
-          limit: Number(limit)
+          page: pageNum,
+          pages: Math.ceil(total / limitNum),
+          limit: limitNum
         }
       }
     });
@@ -180,7 +182,7 @@ export const getProperties = async (req, res) => {
 export const deleteUserById = async (req, res) => {
   const userId = req.params.id;
   const session = await mongoose.startSession();
-  
+
   try {
     await session.withTransaction(async () => {
       // Find the user to delete
@@ -204,9 +206,10 @@ export const deleteUserById = async (req, res) => {
       if (user.role === 'owner') {
         const properties = await Property.find({ owner: userId }, '_id').session(session);
         propertyIds = properties.map(p => p._id);
-        
+
         // Delete owner's properties
         await Property.deleteMany({ owner: userId }).session(session);
+        invalidatePropertyCache();
       }
 
       // Delete user's bookings (as tenant or bookings for their properties)
@@ -240,7 +243,7 @@ export const deleteUserById = async (req, res) => {
     if (error.message === 'User not found') {
       return res.status(404).json({ message: 'User not found' });
     }
-    if (error.message === 'Cannot delete your own admin account' || 
+    if (error.message === 'Cannot delete your own admin account' ||
         error.message === 'Cannot delete admin accounts') {
       return res.status(403).json({ message: error.message });
     }
@@ -256,7 +259,7 @@ export const deleteUserById = async (req, res) => {
 export const deletePropertyById = async (req, res) => {
   const propertyId = req.params.id;
   const session = await mongoose.startSession();
-  
+
   try {
     await session.withTransaction(async () => {
       // Check if property exists
@@ -279,6 +282,7 @@ export const deletePropertyById = async (req, res) => {
 
       // Delete the property
       await Property.findByIdAndDelete(propertyId).session(session);
+      invalidatePropertyCache();
     });
 
     res.json({ message: 'Property and related data deleted successfully' });
@@ -343,37 +347,25 @@ export const getAdminStats = async (req, res) => {
 // @access Private (Admin only)
 export const getAllReviews = async (req, res) => {
   try {
-    const { page = 1, limit = 10, search = '' } = req.query;
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = parsePagination(req.query);
+    const search = asString(req.query.search);
 
 
     // Build search query for property reviews
     const searchQuery = search.trim();
-    let propertyReviewQuery = {};
-    let userRatingQuery = {};
+    const propertyReviewQuery = {};
+    const userRatingQuery = {};
 
-    // For property reviews, search by comment, reviewer email, or property title
-    if (searchQuery) {
-      const searchRegex = { $regex: searchQuery, $options: 'i' };
-      propertyReviewQuery = {
-        $or: [
-          { comment: searchRegex },
-        ]
-      };
-      userRatingQuery = {
-        $or: [
-          { comment: searchRegex },
-        ]
-      };
-    }
+    // Names, emails and titles are encrypted, so a search loads everything
+    // and filters after decryption (comment, reviewer, target)
 
     // Get property reviews and filter by reviewer email or property title if needed
     let propertyReviewsDocs = await mongoose.model('Review').find(propertyReviewQuery)
       .populate('tenant', 'nameEncrypted emailEncrypted isEncrypted')
       .populate('property', 'titleEncrypted locationEncrypted isEncrypted')
       .sort({ createdAt: -1 })
-      .limit(limit * 1)
-      .skip(skip);
+      .limit(searchQuery ? 0 : limit)
+      .skip(searchQuery ? 0 : skip);
 
     let propertyReviews = propertyReviewsDocs.map(r => {
       const rObj = r.toJSON();
@@ -393,12 +385,14 @@ export const getAllReviews = async (req, res) => {
 
     // Get user ratings and filter by reviewer/target email if needed
     let userRatings = await mongoose.model('UserRating').find(userRatingQuery)
-      .populate('ratee', 'name email')
-      .populate('rater', 'name email')
+      // name/email are stored encrypted, so populate the encrypted fields and
+      // let User.toJSON() decrypt them
+      .populate('ratee', 'nameEncrypted emailEncrypted isEncrypted')
+      .populate('rater', 'nameEncrypted emailEncrypted isEncrypted')
       .sort({ createdAt: -1 })
-      .limit(limit * 1)
-      .skip(skip)
-      .lean();
+      .limit(searchQuery ? 0 : limit)
+      .skip(searchQuery ? 0 : skip);
+    userRatings = userRatings.map(r => r.toJSON());
 
     if (searchQuery) {
       userRatings = userRatings.filter(r =>
@@ -437,13 +431,15 @@ export const getAllReviews = async (req, res) => {
     allReviews.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
     // Apply pagination to combined results
-    const paginatedReviews = allReviews.slice(0, limit);
+    const paginatedReviews = searchQuery ? allReviews.slice(skip, skip + limit) : allReviews.slice(0, limit);
 
     // Get total counts for pagination
-    const [totalPropertyReviews, totalUserRatings] = await Promise.all([
-      mongoose.model('Review').countDocuments(propertyReviewQuery),
-      mongoose.model('UserRating').countDocuments(userRatingQuery)
-    ]);
+    const [totalPropertyReviews, totalUserRatings] = searchQuery
+      ? [propertyReviews.length, userRatings.length]
+      : await Promise.all([
+        mongoose.model('Review').countDocuments(propertyReviewQuery),
+        mongoose.model('UserRating').countDocuments(userRatingQuery)
+      ]);
 
     const total = totalPropertyReviews + totalUserRatings;
 
@@ -452,9 +448,9 @@ export const getAllReviews = async (req, res) => {
         reviews: paginatedReviews,
         pagination: {
           total,
-          page: Number(page),
+          page,
           pages: Math.ceil(total / limit),
-          limit: Number(limit)
+          limit
         }
       }
     });

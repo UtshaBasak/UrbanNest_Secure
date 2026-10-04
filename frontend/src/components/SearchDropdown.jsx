@@ -13,6 +13,8 @@ const SearchDropdown = ({ query, onClose }) => {
   });
 
   useEffect(() => {
+    // Ignore responses from a previous query once it has changed
+    let active = true;
     const searchData = async () => {
       if (query.length < 2) {
         setResults({ properties: [], owners: [], tenants: [], loading: false });
@@ -26,6 +28,7 @@ const SearchDropdown = ({ query, onClose }) => {
           searchProperties({ search: query, limit: 5 }),
           searchUsers(query)
         ]);
+        if (!active) return;
 
         const owners = usersRes.data.users.filter(user => user.role === 'owner');
         const tenants = usersRes.data.users.filter(user => user.role === 'tenant');
@@ -38,12 +41,15 @@ const SearchDropdown = ({ query, onClose }) => {
         });
       } catch (error) {
         console.error('Search error:', error);
-        setResults({ properties: [], owners: [], tenants: [], loading: false });
+        if (active) setResults({ properties: [], owners: [], tenants: [], loading: false });
       }
     };
 
     const timeoutId = setTimeout(searchData, 300);
-    return () => clearTimeout(timeoutId);
+    return () => {
+      active = false;
+      clearTimeout(timeoutId);
+    };
   }, [query]);
 
   const hasResults = results.properties.length > 0 || results.owners.length > 0 || results.tenants.length > 0;
@@ -74,9 +80,10 @@ const SearchDropdown = ({ query, onClose }) => {
                   className="flex items-center space-x-3 px-3 py-3 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-xl transition-all duration-200"
                 >
                   <img
-                    src={property.images[0]}
+                    src={property.images?.[0] || '/placeholder.svg'}
                     alt={property.title}
                     className="w-12 h-12 rounded-lg object-cover"
+                    onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/placeholder.svg'; }}
                   />
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-neutral-900 dark:text-neutral-100 truncate">
@@ -109,7 +116,7 @@ const SearchDropdown = ({ query, onClose }) => {
                   className="flex items-center space-x-3 px-3 py-3 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-xl transition-all duration-200"
                 >
                   <div className="w-10 h-10 bg-linear-to-br from-primary-500 to-secondary-500 rounded-full flex items-center justify-center text-white font-semibold">
-                    {owner.name.charAt(0).toUpperCase()}
+                    {(owner.name || '?').charAt(0).toUpperCase()}
                   </div>
                   <div className="flex-1">
                     <p className="font-medium text-neutral-900 dark:text-neutral-100">
@@ -142,7 +149,7 @@ const SearchDropdown = ({ query, onClose }) => {
                   className="flex items-center space-x-3 px-3 py-3 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-xl transition-all duration-200"
                 >
                   <div className="w-10 h-10 bg-linear-to-br from-secondary-500 to-accent-500 rounded-full flex items-center justify-center text-white font-semibold">
-                    {tenant.name.charAt(0).toUpperCase()}
+                    {(tenant.name || '?').charAt(0).toUpperCase()}
                   </div>
                   <div className="flex-1">
                     <p className="font-medium text-neutral-900 dark:text-neutral-100">

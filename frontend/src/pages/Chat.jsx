@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -23,6 +23,10 @@ const Chat = () => {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sendLoading, setSendLoading] = useState(false);
   const [error, setError] = useState('');
+  // Latest selected conversation id, used to ignore responses for a conversation the user has left
+  const selectedIdRef = useRef(null);
+  // Id of the newest message loaded for the selected conversation (to detect new arrivals while polling)
+  const lastMessageIdRef = useRef(null);
 
   useEffect(() => {
     loadConversations();
@@ -39,6 +43,8 @@ const Chat = () => {
   }, [queryConversationId, conversations, selectedConversationId]);
 
   useEffect(() => {
+    selectedIdRef.current = selectedConversationId;
+    lastMessageIdRef.current = null;
     if (selectedConversationId) {
       loadMessages(selectedConversationId);
     } else {
@@ -51,7 +57,7 @@ const Chat = () => {
   useEffect(() => {
     if (!selectedConversationId) return;
     const interval = setInterval(() => {
-      if (!document.hidden) loadMessages(selectedConversationId);
+      if (!document.hidden) loadMessages(selectedConversationId, { silent: true });
     }, 5000);
     return () => clearInterval(interval);
   }, [selectedConversationId]);
@@ -74,22 +80,34 @@ const Chat = () => {
     }
   };
 
-  const loadMessages = async (conversationId) => {
+  // `silent` is used by background polling: no loading skeleton, and the
+  // conversation is only marked read when new messages have arrived.
+  const loadMessages = async (conversationId, { silent = false } = {}) => {
     try {
-      setLoadingMessages(true);
+      if (!silent) setLoadingMessages(true);
       const res = await getConversationMessages(conversationId);
+      // Ignore stale responses for a conversation that is no longer selected
+      if (selectedIdRef.current !== conversationId) return;
       // Messages arrive already decrypted from the backend
+      const nextMessages = res.data.messages || [];
+      const newestId = nextMessages[nextMessages.length - 1]?._id || null;
+      const hasNewMessages = newestId !== lastMessageIdRef.current;
+      lastMessageIdRef.current = newestId;
+
       setSelectedConversation(res.data.conversation);
-      setMessages(res.data.messages || []);
-      await markConversationRead(conversationId);
-      setConversations((prev) => prev.map((c) =>
-        c._id === conversationId ? { ...c, unreadCount: 0 } : c
-      ));
+      if (!silent || hasNewMessages) setMessages(nextMessages);
+
+      if (!silent || hasNewMessages) {
+        await markConversationRead(conversationId);
+        setConversations((prev) => prev.map((c) =>
+          c._id === conversationId ? { ...c, unreadCount: 0 } : c
+        ));
+      }
     } catch (err) {
       console.error(err);
-      setError('Unable to load messages.');
+      if (!silent) setError('Unable to load messages.');
     } finally {
-      setLoadingMessages(false);
+      if (!silent) setLoadingMessages(false);
     }
   };
 
@@ -106,6 +124,8 @@ const Chat = () => {
       // Send plaintext to backend — backend encrypts with ECC before storing
       const res = await sendChatMessage(selectedConversationId, trimmed);
       setMessages((prev) => [...prev, res.data.message]);
+      // Our own message is not "new" for read-tracking purposes
+      lastMessageIdRef.current = res.data.message?._id || lastMessageIdRef.current;
       setMessageText('');
       setConversations((prev) => prev.map((c) => {
         if (c._id === selectedConversationId) {
@@ -200,7 +220,7 @@ const Chat = () => {
         {error && (
           <div className="mb-4 rounded-2xl bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 px-4 py-3 text-sm text-rose-700 dark:text-rose-400 flex items-center justify-between">
             <span>{error}</span>
-            <button onClick={() => setError('')} className="ml-4 text-rose-400 hover:text-rose-600">
+            <button type="button" onClick={() => setError('')} aria-label="Dismiss error" className="ml-4 text-rose-400 hover:text-rose-600">
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -357,6 +377,7 @@ const Chat = () => {
                 <form onSubmit={handleSendMessage} className="mt-auto flex items-center gap-3">
                   <input
                     type="text"
+                    aria-label="Message"
                     value={messageText}
                     onChange={(e) => setMessageText(e.target.value)}
                     placeholder="Type your message..."

@@ -14,23 +14,30 @@ const Notifications = () => {
   const [selectAllExplicit, setSelectAllExplicit] = useState(false);
   const [bulkLoading, setBulkLoading] = useState(false);
 
-  const load = async () => {
+  const requestIdRef = useRef(0);
+
+  // `silent` loads (polling / background refresh) keep the current list on screen
+  const load = async ({ silent = false } = {}) => {
+    const requestId = ++requestIdRef.current;
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const res = await getMyNotifications({ unreadOnly });
+      if (requestId !== requestIdRef.current) return; // a newer request superseded this one
       setItems(res.data.notifications || []);
+      setError('');
     } catch (e) {
+      if (requestId !== requestIdRef.current) return;
       setError('Failed to load notifications');
       // eslint-disable-next-line no-console
       console.error(e);
     } finally {
-      setLoading(false);
+      if (!silent && requestId === requestIdRef.current) setLoading(false);
     }
   };
 
   useEffect(() => {
     load();
-    timerRef.current = setInterval(load, POLL_MS);
+    timerRef.current = setInterval(() => load({ silent: true }), POLL_MS);
     return () => timerRef.current && clearInterval(timerRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [unreadOnly]);
@@ -148,7 +155,7 @@ const Notifications = () => {
     } catch (e) {
       alert('Bulk delete failed');
       // Reload from server to ensure consistency
-      load();
+      load({ silent: true });
     } finally {
       setBulkLoading(false);
     }
@@ -164,6 +171,7 @@ const Notifications = () => {
           <div className="flex items-center gap-2">
             <button
               onClick={() => load()}
+              aria-label="Refresh notifications"
               className="p-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800"
               title="Refresh"
               aria-label="Refresh"

@@ -3,18 +3,12 @@
  * No built-in encryption functions or crypto libraries are used.
  */
 
-function getRandomBytes(n) {
-  const bytes = new Uint8Array(n);
-  for (let i = 0; i < n; i++) {
-    const t = Date.now();
-    const r = Math.random() * 256;
-    const hr = typeof process !== 'undefined' && process.hrtime
-      ? Number(process.hrtime.bigint() % 256n)
-      : Math.floor(Math.random() * 256);
-    bytes[i] = (Math.floor(r) ^ (t & 0xff) ^ hr) & 0xff;
-  }
-  return bytes;
-}
+import { randomBytes } from './random.js';
+
+import { sha512Hex } from './sha512.js';
+
+// Prime generation needs unpredictable randomness
+const getRandomBytes = randomBytes;
 
 export function modPow(base, exp, mod) {
   base = BigInt(base); exp = BigInt(exp); mod = BigInt(mod);
@@ -174,10 +168,9 @@ export function fingerprint(plaintext, publicKey) {
   const e = BigInt(publicKey.e);
   const m = stringToBigInt(plaintext.toLowerCase().trim());
   if (m >= n) {
-    let h = 0n;
-    const encoder = new TextEncoder();
-    const bytes = encoder.encode(plaintext.toLowerCase().trim());
-    for (const b of bytes) h = (h * 31n + BigInt(b)) % n;
+    // Input too long for one RSA block: compress it with SHA-512 first.
+    // (A simple polynomial hash here let different long emails collide.)
+    const h = BigInt('0x' + sha512Hex(plaintext.toLowerCase().trim())) % n;
     return modPow(h, e, n).toString(16);
   }
   return modPow(m, e, n).toString(16);

@@ -13,6 +13,11 @@ const SORT_OPTIONS = [
   { value: 'rating_low', label: 'Rating: Low → High' },
 ];
 
+const ownerRating = (o) => {
+  const n = Number(o?.avgRatingOwner);
+  return Number.isFinite(n) ? n : 0;
+};
+
 const Owners = () => {
   const { user: currentUser } = useAuth();
   const [owners, setOwners] = useState([]);
@@ -37,7 +42,6 @@ const Owners = () => {
       try {
         setLoading(true);
         const res = await getUsers({ role: 'owner' });
-        console.log(res.data);  
         setOwners(res.data.users || []);
       } catch (e) {
         setError('Failed to fetch owners');
@@ -53,7 +57,6 @@ const Owners = () => {
       try {
         if (!currentUser || currentUser.role !== 'tenant') return;
         const res = await getMyBookings({ status: 'approved', limit: 100 });
-        console.log(res.data);  
         const ids = new Set();
         (res.data.bookings || []).forEach(b => {
           if (b.property?.owner) ids.add(b.property.owner._id || b.property.owner);
@@ -77,13 +80,13 @@ const Owners = () => {
       );
     }
     if (minRating > 0) {
-      list = list.filter(o => (o.avgRatingOwner || 0) >= minRating);
+      list = list.filter(o => ownerRating(o) >= minRating);
     }
     switch (sortBy) {
       case 'name_az': list.sort((a, b) => (a.name || '').localeCompare(b.name || '')); break;
       case 'name_za': list.sort((a, b) => (b.name || '').localeCompare(a.name || '')); break;
-      case 'rating_high': list.sort((a, b) => (b.avgRatingOwner || 0) - (a.avgRatingOwner || 0)); break;
-      case 'rating_low': list.sort((a, b) => (a.avgRatingOwner || 0) - (b.avgRatingOwner || 0)); break;
+      case 'rating_high': list.sort((a, b) => ownerRating(b) - ownerRating(a)); break;
+      case 'rating_low': list.sort((a, b) => ownerRating(a) - ownerRating(b)); break;
       case 'oldest': list.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)); break;
       default: list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
     }
@@ -93,9 +96,14 @@ const Owners = () => {
   const openRate = (owner) => { setRateModal({ open: true, target: owner }); setRatingValue(5); setRatingComment(''); };
   const submitRating = async () => {
     if (!rateModal.target) return;
+    const rating = Number(ratingValue);
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      alert('Rating must be a whole number between 1 and 5');
+      return;
+    }
     try {
       setSubmitting(true);
-      await createUserRating({ rateeId: rateModal.target._id, rating: Number(ratingValue), comment: ratingComment, context: 'owner' });
+      await createUserRating({ rateeId: rateModal.target._id, rating, comment: ratingComment, context: 'owner' });
       setRateModal({ open: false, target: null });
     } catch (e) { alert(e.message || 'Failed to submit rating'); }
     finally { setSubmitting(false); }
@@ -123,7 +131,7 @@ const Owners = () => {
               <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400 pointer-events-none" />
               <input
                 type="text"
-                placeholder="Search by name or email…"
+                placeholder="Search by name…"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 className="w-full h-11 pl-10 pr-10 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white placeholder-neutral-400 focus:outline-hidden focus:ring-2 focus:ring-cyan-500 text-sm transition-shadow"
@@ -214,13 +222,13 @@ const Owners = () => {
                     )}
                     <div className="min-w-0">
                       <h3 className="text-base font-semibold text-neutral-900 dark:text-white truncate">{o.name}</h3>
-                      <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">{o.email}</p>
+                      {o.email && <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">{o.email}</p>}
                       <div className="flex items-center gap-1 mt-1">
                         <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
                         <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
-                          {Number(o.avgRatingOwner || 0).toFixed(1)}
+                          {ownerRating(o).toFixed(1)}
                         </span>
-                        <span className="text-xs text-neutral-400">({o.ratingCountOwner || 0} reviews)</span>
+                        <span className="text-xs text-neutral-400">({Number(o.ratingCountOwner) || 0} reviews)</span>
                       </div>
                     </div>
                   </div>
@@ -254,8 +262,10 @@ const Owners = () => {
           <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-2xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
             <h3 className="text-lg font-semibold text-neutral-900 dark:text-white mb-4">Rate {rateModal.target.name}</h3>
             <label className="block text-sm text-neutral-700 dark:text-neutral-300 mb-2">Rating (1–5)</label>
-            <input type="number" min={1} max={5} value={ratingValue} onChange={e => setRatingValue(e.target.value)}
-              className="w-full mb-4 rounded-lg border border-neutral-300 dark:border-neutral-600 bg-transparent px-3 py-2 text-neutral-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-cyan-500" />
+            <select value={ratingValue} onChange={e => setRatingValue(Number(e.target.value))}
+              className="w-full mb-4 rounded-lg border border-neutral-300 dark:border-neutral-600 bg-transparent px-3 py-2 text-neutral-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-cyan-500">
+              {[5, 4, 3, 2, 1].map(n => <option key={n} value={n} className="text-neutral-900">{n} ★</option>)}
+            </select>
             <label className="block text-sm text-neutral-700 dark:text-neutral-300 mb-2">Comment (optional)</label>
             <textarea value={ratingComment} onChange={e => setRatingComment(e.target.value)} rows={3}
               className="w-full mb-4 rounded-lg border border-neutral-300 dark:border-neutral-600 bg-transparent px-3 py-2 text-neutral-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-cyan-500" />

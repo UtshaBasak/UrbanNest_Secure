@@ -1,16 +1,24 @@
-import User from '../models/User.js';
+import mongoose from 'mongoose';
 import Booking from '../models/Booking.js';
+import Property from '../models/Property.js';
 import UserRating from '../models/UserRating.js';
+import { isValidId, parsePagination } from '../utils/validation.js';
 
-// Helper: verify rater is allowed to rate ratee under context (no edits allowed; only first-time)
+// Helper: verify rater is allowed to rate ratee under context.
+// context 'owner' = tenant rating an owner; 'tenant' = owner rating a tenant.
+// Requires an approved or completed booking that connects the two users.
 async function canRate(raterId, rateeId, context) {
-  if (!raterId || !rateeId || raterId.toString() === rateeId.toString()) return false;
-  // must have an active or completed booking connecting them
-  const match = await Booking.findOne({
-    status: { $in: ['approved', 'completed'] },
-    tenant: context === 'tenant' ? rateeId : raterId, // when rating tenant, ratee is tenant
-  }).populate({ path: 'property', select: 'owner', match: { owner: context === 'owner' ? rateeId : raterId } });
-  return !!(match && match.property);
+  if (!raterId || !isValidId(String(rateeId)) || raterId.toString() === rateeId.toString()) return false;
+  const ownerId = context === 'owner' ? rateeId : raterId;
+  const tenantId = context === 'tenant' ? rateeId : raterId;
+  const ownerProperties = await Property.find({ owner: ownerId }).distinct('_id');
+  if (!ownerProperties.length) return false;
+  const booking = await Booking.exists({
+    tenant: tenantId,
+    property: { $in: ownerProperties },
+    status: { $in: ['approved', 'completed'] }
+  });
+  return !!booking;
 }
 
 // @desc Create or update a user rating (allows updating an existing rating)
@@ -19,24 +27,34 @@ async function canRate(raterId, rateeId, context) {
 export const createRating = async (req, res) => {
   try {
     const { rateeId, rating, comment = '', context } = req.body;
-    if (!rateeId || !rating || !context) {
+    if (!rateeId || rating === undefined || !context) {
       return res.status(400).json({ message: 'rateeId, rating, and context are required' });
+    }
+    if (!isValidId(rateeId)) {
+      return res.status(400).json({ message: 'Invalid rateeId' });
     }
     if (!['owner', 'tenant'].includes(context)) {
       return res.status(400).json({ message: 'Invalid context' });
     }
-    const raterId = req.user.id || req.user._id;
+    const ratingValue = Number(rating);
+    if (!Number.isInteger(ratingValue) || ratingValue < 1 || ratingValue > 5) {
+      return res.status(400).json({ message: 'Rating must be a whole number from 1 to 5' });
+    }
+    if (typeof comment !== 'string' || comment.length > 500) {
+      return res.status(400).json({ message: 'Comment must be at most 500 characters' });
+    }
+    const raterId = req.user._id;
 
     // Validate allowed relation (must have an approved booking linking rater and ratee)
     const ok = await canRate(raterId, rateeId, context);
     if (!ok) return res.status(403).json({ message: 'Not allowed to rate this user' });
 
     // Create or update existing rating by this rater for this ratee/context
-    const existing = await UserRating.findOne({ ratee: rateeId, rater: raterId, context });
+    const existing = await UserRating.exists({ ratee: rateeId, rater: raterId, context });
     const updated = await UserRating.findOneAndUpdate(
       { ratee: rateeId, rater: raterId, context },
-      { $set: { rating, comment } },
-      { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true }
+      { $set: { rating: ratingValue, comment: comment.trim() } },
+      { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true, runValidators: true }
     );
     const status = existing ? 200 : 201;
     res.status(status).json({ data: { rating: updated, updated: !!existing } });
@@ -74,7 +92,7 @@ export const getRatingSummary = async (req, res) => {
   try {
     const userId = req.params.userId;
     const groups = await UserRating.aggregate([
-      { $match: { ratee: UserRating.db.base.Types.ObjectId.createFromHexString(userId) } },
+      { $match: { ratee: new mongoose.Types.ObjectId(userId) } },
       { $group: { _id: '$context', avg: { $avg: '$rating' }, count: { $sum: 1 } } }
     ]);
     const summary = { owner: { avg: 0, count: 0 }, tenant: { avg: 0, count: 0 } };
@@ -94,15 +112,15 @@ export const getRatingSummary = async (req, res) => {
 // @access Public
 export const listRatings = async (req, res) => {
   try {
-    const { page = 1, limit = 20 } = req.query;
+    const { page, limit, skip } = parsePagination(req.query, { defaultLimit: 20 });
     const userId = req.params.userId;
     const ratings = await UserRating.find({ ratee: userId })
-      .populate('rater', 'name profileImage role')
+      .populate('rater', 'nameEncrypted profileImage role isEncrypted')
       .sort({ createdAt: -1 })
-      .limit(Number(limit))
-      .skip((Number(page) - 1) * Number(limit));
+      .limit(limit)
+      .skip(skip);
     const total = await UserRating.countDocuments({ ratee: userId });
-    res.json({ data: { ratings, pagination: { total, page: Number(page), pages: Math.ceil(total / limit) } } });
+    res.json({ data: { ratings, pagination: { total, page, pages: Math.ceil(total / limit) } } });
   } catch (error) {
     console.error('List ratings error:', error);
     res.status(500).json({ message: 'Server error while listing ratings' });

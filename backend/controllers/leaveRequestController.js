@@ -2,6 +2,10 @@ import LeaveRequest from '../models/LeaveRequest.js';
 import Booking from '../models/Booking.js';
 import Property from '../models/Property.js';
 import { createNotification } from './notificationController.js';
+import { invalidatePropertyCache } from '../utils/propertyCache.js';
+import { isValidId } from '../utils/validation.js';
+
+const LEAVE_CONDITIONS = ['immediate', 'end_of_month', 'end_of_next_month', 'end_of_current_booking'];
 
 // Utility to compute effective end date based on condition
 function computeEffectiveEndDate(condition, booking) {
@@ -32,8 +36,12 @@ function computeEffectiveEndDate(condition, booking) {
 export const createLeaveRequest = async (req, res) => {
   try {
     const { bookingId, message = '' } = req.body;
+    if (!isValidId(bookingId)) return res.status(400).json({ message: 'Invalid booking id' });
+    if (typeof message !== 'string' || message.length > 1000) {
+      return res.status(400).json({ message: 'Message must be at most 1000 characters' });
+    }
     const booking = await Booking.findById(bookingId).populate({ path: 'property', select: 'owner availability availabilityStatus titleEncrypted isEncrypted' });
-    if (!booking) return res.status(404).json({ message: 'Booking not found' });
+    if (!booking || !booking.property) return res.status(404).json({ message: 'Booking not found' });
     if (booking.tenant.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Access denied' });
     }
@@ -103,9 +111,19 @@ export const decideLeaveRequest = async (req, res) => {
   try {
     const { id } = req.params;
     const { decision, condition = 'end_of_month', note = '' } = req.body; // decision: 'approve' | 'reject'
+    if (!['approve', 'reject'].includes(decision)) {
+      return res.status(400).json({ message: 'Decision must be approve or reject' });
+    }
+    if (decision === 'approve' && !LEAVE_CONDITIONS.includes(condition)) {
+      return res.status(400).json({ message: 'Invalid leave condition' });
+    }
+    if (typeof note !== 'string' || note.length > 1000) {
+      return res.status(400).json({ message: 'Note must be at most 1000 characters' });
+    }
 
     const lr = await LeaveRequest.findById(id).populate({ path: 'booking', populate: { path: 'property', select: 'owner availability availabilityStatus titleEncrypted isEncrypted' } });
     if (!lr) return res.status(404).json({ message: 'Leave request not found' });
+    if (!lr.booking?.property) return res.status(409).json({ message: 'The booking for this request no longer exists' });
 
     // Only owner of booking's property (or admin) can decide
     const isOwner = lr.booking.property.owner.toString() === req.user._id.toString();
@@ -132,28 +150,33 @@ export const decideLeaveRequest = async (req, res) => {
     }
 
     // Approve path
-    const effectiveEndDate = computeEffectiveEndDate(condition, lr.booking);
+    const booking = await Booking.findById(lr.booking._id);
+    if (!booking) return res.status(409).json({ message: 'The booking for this request no longer exists' });
+
+    let effectiveEndDate = computeEffectiveEndDate(condition, lr.booking);
+    // A booking that has not started yet cannot end before its start date
+    if (effectiveEndDate <= booking.startDate) {
+      effectiveEndDate = new Date(booking.startDate.getTime() + 1);
+    }
+
+    // Apply to the booking first so a failure never leaves the request
+    // marked approved while the booking is unchanged
+    if (!booking.endDate || effectiveEndDate < booking.endDate) {
+      booking.endDate = effectiveEndDate;
+    }
+    const endsNow = effectiveEndDate <= new Date();
+    if (endsNow) booking.status = 'completed';
+    await booking.save();
+    if (endsNow) {
+      await Property.findByIdAndUpdate(booking.property, { availability: 'Available', availabilityStatus: 'Available' });
+      invalidatePropertyCache();
+    }
 
     lr.status = 'approved';
     lr.condition = condition;
     lr.decisionNote = note;
     lr.effectiveEndDate = effectiveEndDate;
     await lr.save();
-
-    // Apply to booking
-    const booking = await Booking.findById(lr.booking._id);
-    if (booking) {
-      // shorten booking end date if earlier
-      if (!booking.endDate || effectiveEndDate < booking.endDate) {
-        booking.endDate = effectiveEndDate;
-      }
-      // if immediate and date is now or past, mark completed and free property
-      if (effectiveEndDate <= new Date()) {
-        booking.status = 'completed';
-        await Property.findByIdAndUpdate(booking.property, { availability: 'Available', availabilityStatus: 'Available' });
-      }
-      await booking.save();
-    }
 
     try {
       await createNotification({

@@ -18,8 +18,8 @@ const UserRatings = () => {
           getUser(id),
           listUserRatings(id, { limit: 100 }),
         ]);
-        setUser(uRes.data.user || null);
-        setRatings(rRes.data.ratings || []);
+        setUser(uRes?.data?.user || null);
+        setRatings(rRes?.data?.ratings || []);
       } catch (e) {
         setError('Failed to load rating details');
       } finally {
@@ -50,7 +50,7 @@ const UserRatings = () => {
         </div>
 
         <h1 className="text-2xl font-semibold text-neutral-900 dark:text-white mb-4">
-          Ratings for {user ? user.name : 'User'}
+          Ratings for {user?.name || 'User'}
         </h1>
 
         {loading ? (
@@ -67,17 +67,17 @@ const UserRatings = () => {
                   {r.rater?.profileImage ? (
                     <img
                       src={r.rater.profileImage}
-                      alt={r.rater?.name || 'Rater'}
+                      alt={r.rater?.name || 'Anonymous'}
                       className="w-10 h-10 rounded-full object-cover border border-neutral-200 dark:border-neutral-700"
                     />
                   ) : (
                     <div className="w-10 h-10 rounded-full bg-neutral-200 dark:bg-neutral-700 flex items-center justify-center text-neutral-700 dark:text-neutral-200 font-semibold">
-                      {(r.rater?.name || 'U').charAt(0).toUpperCase()}
+                      {(r.rater?.name || 'A').charAt(0).toUpperCase()}
                     </div>
                   )}
                   <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-x-2 text-sm">
-                      <span className="font-medium text-neutral-900 dark:text-white">{r.rater?.name || 'Unknown'}</span>
+                      <span className="font-medium text-neutral-900 dark:text-white">{r.rater?.name || 'Anonymous'}</span>
                       {r.rater?.role && (
                         <span className="text-neutral-500 dark:text-neutral-400">• {r.rater.role}</span>
                       )}

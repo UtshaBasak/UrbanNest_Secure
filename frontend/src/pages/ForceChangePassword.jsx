@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { apiChangePassword } from '../utils/api';
 import { Lock, Eye, EyeOff, AlertCircle, CheckCircle, ShieldAlert } from 'lucide-react';
@@ -13,7 +13,7 @@ function getPasswordStrength(pw) {
 
 const ForceChangePassword = () => {
   const navigate = useNavigate();
-  const { clearPasswordExpired, logout } = useAuth();
+  const { user, loading: authLoading, clearPasswordExpired, logout } = useAuth();
   const [currentPw, setCurrentPw] = useState('');
   const [newPw, setNewPw] = useState('');
   const [confirmPw, setConfirmPw] = useState('');
@@ -22,6 +22,15 @@ const ForceChangePassword = () => {
   const [error, setError] = useState('');
 
   const strength = useMemo(() => getPasswordStrength(newPw), [newPw]);
+
+  const handleSignOut = async () => {
+    await logout();
+    navigate('/login', { replace: true });
+  };
+
+  if (!authLoading && !user) {
+    return <Navigate to="/login" replace />;
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -101,7 +110,7 @@ const ForceChangePassword = () => {
             </button>
           </form>
           <div className="mt-6 text-center">
-            <button onClick={logout} className="text-sm text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300">Sign out instead</button>
+            <button type="button" onClick={handleSignOut} className="text-sm text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300">Sign out instead</button>
           </div>
         </div>
       </div>

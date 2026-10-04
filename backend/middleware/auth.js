@@ -14,6 +14,12 @@ function hashToken(token) {
   return h.toString(16);
 }
 
+// True when the token predates the user's most recent password change
+function isIssuedBeforePasswordChange(decoded, user) {
+  if (!user.passwordChangedAt || !decoded.iat) return false;
+  return decoded.iat < Math.floor(user.passwordChangedAt.getTime() / 1000);
+}
+
 /**
  * Verify session token (RSA + CBC-MAC) from HTTP-only cookie.
  * Enforces: token validity, blocklist check, IP/User-Agent binding.
@@ -42,9 +48,14 @@ export const authenticateToken = async (req, res, next) => {
       throw err;
     }
 
+    // Only real access tokens may authenticate. Tokens issued for another
+    // purpose (e.g. the 2FA-pending temp token) carry a purpose claim.
+    if (decoded.purpose || !decoded.userId) {
+      return res.status(401).json({ message: 'Invalid token.' });
+    }
+
     // IP / User-Agent binding: warn but don't block in dev
     const clientIp = req.ip || req.connection?.remoteAddress || '';
-    const clientUA = req.headers['user-agent'] || '';
     if (decoded.ip && decoded.ip !== clientIp) {
       console.warn(`[Auth] IP mismatch: token=${decoded.ip}, request=${clientIp}`);
       if (process.env.NODE_ENV === 'production') {
@@ -58,6 +69,11 @@ export const authenticateToken = async (req, res, next) => {
       return res.status(401).json({ message: 'Invalid token or user not found.' });
     }
 
+    // Tokens issued before the last password change are no longer valid
+    if (isIssuedBeforePasswordChange(decoded, user)) {
+      return res.status(401).json({ message: 'Session expired. Please log in again.', expired: true });
+    }
+
     req.user = user;
     req.tokenData = decoded;
     next();
@@ -68,6 +84,29 @@ export const authenticateToken = async (req, res, next) => {
     console.error('Authentication error:', error);
     res.status(401).json({ message: 'Invalid token.' });
   }
+};
+
+/**
+ * Attach req.user when a valid session cookie is present, but never reject.
+ * Used on public routes that show extra details to signed-in viewers.
+ */
+export const optionalAuth = async (req, res, next) => {
+  try {
+    const token = req.cookies.accessToken || req.cookies.token;
+    if (!token) return next();
+    if (await BlockedToken.exists({ tokenHash: hashToken(token) })) return next();
+    const decoded = verifySessionToken(token, 'session');
+    if (decoded.purpose || !decoded.userId) return next();
+    if (decoded.ip && decoded.ip !== (req.ip || '') && process.env.NODE_ENV === 'production') return next();
+    const user = await User.findById(decoded.userId).select('-password');
+    if (user && user.isActive && !isIssuedBeforePasswordChange(decoded, user)) {
+      req.user = user;
+      req.tokenData = decoded;
+    }
+  } catch {
+    // Invalid or expired token: continue as an anonymous visitor
+  }
+  next();
 };
 
 // Role-based access control

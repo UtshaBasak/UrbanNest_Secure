@@ -13,6 +13,11 @@ const SORT_OPTIONS = [
   { value: 'rating_low', label: 'Rating: Low → High' },
 ];
 
+const tenantRating = (t) => {
+  const n = Number(t?.avgRatingTenant);
+  return Number.isFinite(n) ? n : 0;
+};
+
 const Tenants = () => {
   const { user: currentUser } = useAuth();
   const [tenants, setTenants] = useState([]);
@@ -75,13 +80,13 @@ const Tenants = () => {
       );
     }
     if (minRating > 0) {
-      list = list.filter(t => (t.avgRatingTenant || 0) >= minRating);
+      list = list.filter(t => tenantRating(t) >= minRating);
     }
     switch (sortBy) {
       case 'name_az': list.sort((a, b) => (a.name || '').localeCompare(b.name || '')); break;
       case 'name_za': list.sort((a, b) => (b.name || '').localeCompare(a.name || '')); break;
-      case 'rating_high': list.sort((a, b) => (b.avgRatingTenant || 0) - (a.avgRatingTenant || 0)); break;
-      case 'rating_low': list.sort((a, b) => (a.avgRatingTenant || 0) - (b.avgRatingTenant || 0)); break;
+      case 'rating_high': list.sort((a, b) => tenantRating(b) - tenantRating(a)); break;
+      case 'rating_low': list.sort((a, b) => tenantRating(a) - tenantRating(b)); break;
       case 'oldest': list.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)); break;
       default: list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
     }
@@ -91,9 +96,14 @@ const Tenants = () => {
   const openRate = (tenant) => { setRateModal({ open: true, target: tenant }); setRatingValue(5); setRatingComment(''); };
   const submitRating = async () => {
     if (!rateModal.target) return;
+    const rating = Number(ratingValue);
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      alert('Rating must be a whole number between 1 and 5');
+      return;
+    }
     try {
       setSubmitting(true);
-      await createUserRating({ rateeId: rateModal.target._id, rating: Number(ratingValue), comment: ratingComment, context: 'tenant' });
+      await createUserRating({ rateeId: rateModal.target._id, rating, comment: ratingComment, context: 'tenant' });
       setRateModal({ open: false, target: null });
     } catch (e) { alert(e.message || 'Failed to submit rating'); }
     finally { setSubmitting(false); }
@@ -121,7 +131,7 @@ const Tenants = () => {
               <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400 pointer-events-none" />
               <input
                 type="text"
-                placeholder="Search by name or email…"
+                placeholder="Search by name…"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 className="w-full h-11 pl-10 pr-10 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white placeholder-neutral-400 focus:outline-hidden focus:ring-2 focus:ring-cyan-500 text-sm transition-shadow"
@@ -212,13 +222,13 @@ const Tenants = () => {
                     )}
                     <div className="min-w-0">
                       <h3 className="text-base font-semibold text-neutral-900 dark:text-white truncate">{t.name}</h3>
-                      <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">{t.email}</p>
+                      {t.email && <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">{t.email}</p>}
                       <div className="flex items-center gap-1 mt-1">
                         <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
                         <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
-                          {Number(t.avgRatingTenant || 0).toFixed(1)}
+                          {tenantRating(t).toFixed(1)}
                         </span>
-                        <span className="text-xs text-neutral-400">({t.ratingCountTenant || 0} reviews)</span>
+                        <span className="text-xs text-neutral-400">({Number(t.ratingCountTenant) || 0} reviews)</span>
                       </div>
                     </div>
                   </div>
@@ -265,8 +275,10 @@ const Tenants = () => {
             <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-2xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
               <h3 className="text-lg font-semibold text-neutral-900 dark:text-white mb-4">Rate {rateModal.target.name}</h3>
               <label className="block text-sm text-neutral-700 dark:text-neutral-300 mb-2">Rating (1–5)</label>
-              <input type="number" min={1} max={5} value={ratingValue} onChange={e => setRatingValue(e.target.value)}
-                className="w-full mb-4 rounded-lg border border-neutral-300 dark:border-neutral-600 bg-transparent px-3 py-2 text-neutral-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-cyan-500" />
+              <select value={ratingValue} onChange={e => setRatingValue(Number(e.target.value))}
+                className="w-full mb-4 rounded-lg border border-neutral-300 dark:border-neutral-600 bg-transparent px-3 py-2 text-neutral-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-cyan-500">
+                {[5, 4, 3, 2, 1].map(n => <option key={n} value={n} className="text-neutral-900">{n} ★</option>)}
+              </select>
               <label className="block text-sm text-neutral-700 dark:text-neutral-300 mb-2">Comment (optional)</label>
               <textarea value={ratingComment} onChange={e => setRatingComment(e.target.value)} rows={3}
                 className="w-full mb-4 rounded-lg border border-neutral-300 dark:border-neutral-600 bg-transparent px-3 py-2 text-neutral-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-cyan-500" />

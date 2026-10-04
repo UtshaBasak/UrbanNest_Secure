@@ -8,6 +8,7 @@ import {
   deleteBooking
 } from '../controllers/bookingController.js';
 import { authenticateToken, authorize } from '../middleware/auth.js';
+import { validateIds } from '../utils/validation.js';
 
 const router = express.Router();
 
@@ -21,7 +22,7 @@ const statusUpdateValidation = [
 // Routes
 router.post('/', 
   authenticateToken, 
-  authorize('tenant', 'owner'), 
+  authorize('tenant'), 
   createBooking
 );
 
@@ -29,6 +30,7 @@ router.get('/my', authenticateToken, getMyBookings);
 
 router.put('/:id/status', 
   authenticateToken, 
+  validateIds('id'), 
   authorize('owner', 'admin'), 
   statusUpdateValidation, 
   updateBookingStatus
@@ -36,12 +38,14 @@ router.put('/:id/status',
 
 router.put('/:id/cancel', 
   authenticateToken, 
+  validateIds('id'), 
   authorize('tenant'), 
   cancelBooking
 );
 
 router.delete('/:id', 
   authenticateToken, 
+  validateIds('id'), 
   deleteBooking
 );
 

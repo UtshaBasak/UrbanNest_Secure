@@ -10,6 +10,7 @@ import {
   canReviewCheck
 } from '../controllers/reviewController.js';
 import { authenticateToken, authorize } from '../middleware/auth.js';
+import { validateIds } from '../utils/validation.js';
 
 const router = express.Router();
 
@@ -24,7 +25,7 @@ const reviewValidation = [
 // Eligibility check first to avoid shadowing
 router.get('/can-review/check', authenticateToken, authorize('tenant'), canReviewCheck);
 // Compatibility route for path parameter
-router.get('/can-review/:propertyId', authenticateToken, authorize('tenant'), canReviewCheck);
+router.get('/can-review/:propertyId', authenticateToken, validateIds('propertyId'), authorize('tenant'), canReviewCheck);
 router.post('/', 
   authenticateToken, 
   authorize('tenant'), 
@@ -32,7 +33,7 @@ router.post('/',
   createReview
 );
 
-router.get('/property/:propertyId', getPropertyReviews);
+router.get('/property/:propertyId', validateIds('propertyId'), getPropertyReviews);
 router.get('/my', authenticateToken, getMyReviews);
 router.get('/my-properties', authenticateToken, authorize('owner'), getMyPropertiesReviews);
 

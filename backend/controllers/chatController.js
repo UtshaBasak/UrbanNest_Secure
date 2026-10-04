@@ -6,7 +6,27 @@ import User from '../models/User.js';
 import Notification from '../models/Notification.js';
 import { generateECCKeyPair } from '../crypto/ecc.js';
 import { encryptMessage, decryptMessage } from '../crypto/eccMessageCrypto.js';
-import { getPrivateKey } from '../crypto/keyManager.js';
+import { getPrivateKey, getPublicKey } from '../crypto/keyManager.js';
+import { encrypt as rsaEncrypt, decrypt as rsaDecrypt } from '../crypto/rsa.js';
+import { isValidId } from '../utils/validation.js';
+
+// Conversation private keys are stored RSA-encrypted ("rsa:<ciphertext>") so a
+// database dump alone cannot decrypt messages. Older conversations stored the
+// scalar in plaintext; those are still readable and get wrapped on next send.
+const WRAPPED_PREFIX = 'rsa:';
+
+function wrapPrivateKey(scalar) {
+  return WRAPPED_PREFIX + rsaEncrypt(String(scalar), getPublicKey('user-data'));
+}
+
+function getConversationPrivateKey(conversation) {
+  const stored = conversation.eccPrivateKey;
+  if (!stored) return null;
+  if (stored.startsWith(WRAPPED_PREFIX)) {
+    return rsaDecrypt(stored.slice(WRAPPED_PREFIX.length), getPrivateKey('user-data'));
+  }
+  return stored;
+}
 
 const normalizeIds = (ids) => ids.map((id) => String(id));
 
@@ -15,11 +35,16 @@ const normalizeIds = (ids) => ids.map((id) => String(id));
 // If no key pair exists yet, generates one and persists it.
 async function ensureConversationECCKeys(conversation) {
   if (conversation.eccPublicKey && conversation.eccPrivateKey) {
+    // Wrap a legacy plaintext key the first time we touch the conversation
+    if (!conversation.eccPrivateKey.startsWith(WRAPPED_PREFIX)) {
+      conversation.eccPrivateKey = wrapPrivateKey(conversation.eccPrivateKey);
+      await conversation.save();
+    }
     return conversation; // already has keys
   }
   const pair = generateECCKeyPair();
   conversation.eccPublicKey  = pair.publicKey;   // { x: string, y: string }
-  conversation.eccPrivateKey = pair.privateKey;  // BigInt string
+  conversation.eccPrivateKey = wrapPrivateKey(pair.privateKey);
   await conversation.save();
   return conversation;
 }
@@ -32,6 +57,9 @@ export const createConversation = async (req, res) => {
       return res.status(400).json({ message: 'participantIds must be an array of two user IDs' });
     }
 
+    if (!participantIds.every(isValidId) || (propertyId && !isValidId(propertyId))) {
+      return res.status(400).json({ message: 'Invalid participant or property id' });
+    }
     const normalizedParticipantIds = [...new Set(normalizeIds(participantIds))];
     if (normalizedParticipantIds.length !== 2) {
       return res.status(400).json({ message: 'participantIds must include two distinct users' });
@@ -98,7 +126,12 @@ export const getMyConversations = async (req, res) => {
         (participant) => String(participant._id) !== String(req.user._id)
       );
       // Capture eccPrivateKey BEFORE calling toJSON() (which strips it)
-      const eccPrivKey = conversation.eccPrivateKey;
+      let eccPrivKey = null;
+      try {
+        eccPrivKey = getConversationPrivateKey(conversation);
+      } catch (e) {
+        console.error('[Chat] Could not unwrap conversation key:', e.message);
+      }
       // Strip ECC keys from the response — never expose private key to frontend
       const convObj = conversation.toJSON();
       delete convObj.eccPrivateKey;
@@ -184,18 +217,24 @@ export const getConversationMessages = async (req, res) => {
       .populate('sender', 'nameEncrypted profileImage role isEncrypted');
 
     // Decrypt each encrypted message using the conversation's ECC private key
+    let conversationKey = null;
+    try {
+      conversationKey = getConversationPrivateKey(conversation);
+    } catch (e) {
+      console.error('[Chat] Could not unwrap conversation key:', e.message);
+    }
     const messages = rawMessages.map((msg) => {
       const msgObj = msg.toJSON();
 
       if (msgObj.isEncrypted && msgObj.encryptedEnvelope) {
-        if (!conversation.eccPrivateKey) {
+        if (!conversationKey) {
           // Should never happen — private key always stored with envelope
           msgObj.text = '[decryption key unavailable]';
           return msgObj;
         }
         try {
           // DECRYPT using from-scratch ECC (ecc.js + sha512.js + AES-GCM)
-          msgObj.text = decryptMessage(msgObj.encryptedEnvelope, conversation.eccPrivateKey);
+          msgObj.text = decryptMessage(msgObj.encryptedEnvelope, conversationKey);
         } catch (err) {
           console.error('[Chat] Decryption failed for message', msgObj._id, err.message);
           msgObj.text = '[decryption failed]';
@@ -280,7 +319,12 @@ export const sendMessage = async (req, res) => {
     );
 
     const senderDecrypted = req.user.getDecryptedData();
-    if (recipientId) {
+    const alreadyNotified = recipientId && await Notification.exists({
+      user: recipientId,
+      read: false,
+      'meta.conversationId': conversation._id
+    });
+    if (recipientId && !alreadyNotified) {
       await Notification.create({
         user: recipientId,
         title: 'New message',

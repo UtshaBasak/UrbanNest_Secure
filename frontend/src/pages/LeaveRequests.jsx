@@ -21,12 +21,14 @@ const LeaveRequests = () => {
   const [error, setError] = useState('');
 
   const [decisionById, setDecisionById] = useState({});
+  const [pendingById, setPendingById] = useState({});
 
   const fetchItems = async () => {
     try {
       setLoading(true);
       const res = await listMyLeaveRequests();
       setItems(res?.data?.leaveRequests || []);
+      setError('');
     } catch (e) {
       console.error(e);
       setError(e?.message || 'Failed to load leave requests');
@@ -40,7 +42,9 @@ const LeaveRequests = () => {
   }, []);
 
   const handleDecision = async (id, approve) => {
+    if (pendingById[id]) return;
     const state = decisionById[id] || { condition: 'end_of_month', note: '' };
+    setPendingById((s) => ({ ...s, [id]: true }));
     try {
       await decideLeaveRequest(id, {
         decision: approve ? 'approve' : 'reject',
@@ -50,7 +54,19 @@ const LeaveRequests = () => {
       await fetchItems();
     } catch (e) {
       alert(e?.message || 'Failed to submit decision');
+    } finally {
+      setPendingById((s) => {
+        const next = { ...s };
+        delete next[id];
+        return next;
+      });
     }
+  };
+
+  const formatDate = (d) => {
+    if (!d) return null;
+    const date = new Date(d);
+    return Number.isNaN(date.getTime()) ? null : date.toLocaleDateString();
   };
 
   return (
@@ -90,12 +106,18 @@ const LeaveRequests = () => {
                       </span>
                     )}
                   </div>
-                  <p className="text-sm text-neutral-700 dark:text-neutral-300">
-                    Booking: <span className="font-medium">{lr.booking?.property?.title || 'Property'}</span>
-                  </p>
-                  <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                    Period: {new Date(lr.booking?.startDate).toLocaleDateString()} - {new Date(lr.booking?.endDate).toLocaleDateString()}
-                  </p>
+                  {lr.booking ? (
+                    <>
+                      <p className="text-sm text-neutral-700 dark:text-neutral-300">
+                        Booking: <span className="font-medium">{lr.booking.property?.title || 'Property'}</span>
+                      </p>
+                      <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                        Period: {formatDate(lr.booking.startDate) || '—'} - {formatDate(lr.booking.endDate) || '—'}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-sm italic text-neutral-500 dark:text-neutral-400">Booking removed</p>
+                  )}
                   {lr.message && (
                     <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">Message: {lr.message}</p>
                   )}
@@ -137,13 +159,15 @@ const LeaveRequests = () => {
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => handleDecision(lr._id, true)}
-                        className="inline-flex items-center px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-md"
+                        disabled={!!pendingById[lr._id]}
+                        className="inline-flex items-center px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         Approve
                       </button>
                       <button
                         onClick={() => handleDecision(lr._id, false)}
-                        className="inline-flex items-center px-3 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-md"
+                        disabled={!!pendingById[lr._id]}
+                        className="inline-flex items-center px-3 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         Reject
                       </button>

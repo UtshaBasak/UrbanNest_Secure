@@ -27,11 +27,22 @@ const PropertyDetails = () => {
   const [isFavourited, setIsFavourited] = useState(false);
   const [relatedProperties, setRelatedProperties] = useState([]);
   const [relatedLoading, setRelatedLoading] = useState(false);
+  const userId = user?._id || user?.id;
+  const isOwner = !!user && String(property?.owner?._id || property?.owner) === String(userId);
+  const isAdmin = user?.role === 'admin';
 
   useEffect(() => {
     if (id) {
-      fetchPropertyDetails();
-      fetchPropertyReviews();
+      // Reset per-property state and ignore responses for a previous id
+      let cancelled = false;
+      const isCancelled = () => cancelled;
+      setError('');
+      setProperty(null);
+      setReviews([]);
+      setRelatedProperties([]);
+      setCurrentImageIndex(0);
+      fetchPropertyDetails(isCancelled);
+      fetchPropertyReviews(isCancelled);
       // Add to recently viewed in localStorage
       try {
         const key = 'recentlyViewedProperties';
@@ -50,6 +61,7 @@ const PropertyDetails = () => {
       } catch (e) {
         // ignore localStorage errors
       }
+      return () => { cancelled = true; };
     }
   }, [id]);
 
@@ -68,6 +80,7 @@ const PropertyDetails = () => {
 
   // Initialize favourites state from server (tenant only)
   useEffect(() => {
+    let cancelled = false;
     const initFav = async () => {
       try {
         if (!user || user.role !== 'tenant' || !id) {
@@ -75,15 +88,17 @@ const PropertyDetails = () => {
           return;
         }
         const res = await getMyFavourites();
+        if (cancelled) return;
         const favs = res.data?.favourites || [];
         const has = favs.some(f => f.itemType === 'property' && String(f.itemId || f.property?._id) === String(id));
         setIsFavourited(has);
       } catch (e) {
-        setIsFavourited(false);
+        if (!cancelled) setIsFavourited(false);
       }
     };
     initFav();
-  }, [user?.role, user?._id, id]);
+    return () => { cancelled = true; };
+  }, [user?.role, userId, id]);
 
   const handleToggleFavourite = async () => {
     if (!user) {
@@ -111,6 +126,7 @@ const PropertyDetails = () => {
 
   // Check eligibility to review this property (tenant with completed rental)
   useEffect(() => {
+    let cancelled = false;
     const check = async () => {
       try {
         if (!user || user.role !== 'tenant' || !id) {
@@ -118,13 +134,14 @@ const PropertyDetails = () => {
           return;
         }
         const res = await canReviewProperty(id);
-        setCanReview(!!res.data?.canReview);
+        if (!cancelled) setCanReview(!!res.data?.canReview);
       } catch (e) {
-        setCanReview(false);
+        if (!cancelled) setCanReview(false);
       }
     };
     check();
-  }, [user?.role, user?._id, id]);
+    return () => { cancelled = true; };
+  }, [user?.role, userId, id]);
 
   const handleReviewSubmit = async (e) => {
     e.preventDefault();
@@ -156,7 +173,7 @@ const PropertyDetails = () => {
     try {
       const ownerId = property.owner?._id || property.owner;
       const response = await createConversation({
-        participantIds: [ownerId, user._id || user.id],
+        participantIds: [ownerId, userId],
         propertyId: property._id
       });
       const conversationId = response.data.conversation._id;
@@ -192,35 +209,37 @@ const PropertyDetails = () => {
     }
   };
 
-  const fetchPropertyDetails = async () => {
+  const fetchPropertyDetails = async (isCancelled) => {
     try {
       setLoading(true);
       const response = await getProperty(id);
+      if (isCancelled()) return;
       const propertyData = response.data.property;
       setProperty(propertyData);
-      
+
       // Fetch related properties after getting property details
       if (propertyData) {
-        fetchRelatedProperties(propertyData);
+        fetchRelatedProperties(propertyData, isCancelled);
       }
     } catch (error) {
+      if (isCancelled()) return;
       setError('Failed to fetch property details');
       console.error('Error fetching property:', error);
     } finally {
-      setLoading(false);
+      if (!isCancelled()) setLoading(false);
     }
   };
 
-  const fetchPropertyReviews = async () => {
+  const fetchPropertyReviews = async (isCancelled) => {
     try {
       const response = await getPropertyReviews(id);
-      setReviews(response.data.reviews || []);
+      if (!isCancelled()) setReviews(response.data.reviews || []);
     } catch (error) {
       console.error('Error fetching reviews:', error);
     }
   };
 
-  const fetchRelatedProperties = async (currentProperty) => {
+  const fetchRelatedProperties = async (currentProperty, isCancelled) => {
     try {
       setRelatedLoading(true);
       
@@ -248,13 +267,13 @@ const PropertyDetails = () => {
         
         related = [...related, ...moreProperties].slice(0, 8);
       }
-      
-      setRelatedProperties(related.slice(0, 8));
+
+      if (!isCancelled()) setRelatedProperties(related.slice(0, 8));
     } catch (error) {
       console.error('Error fetching related properties:', error);
-      setRelatedProperties([]);
+      if (!isCancelled()) setRelatedProperties([]);
     } finally {
-      setRelatedLoading(false);
+      if (!isCancelled()) setRelatedLoading(false);
     }
   };
 
@@ -291,6 +310,12 @@ const PropertyDetails = () => {
       setBookingLoading(false);
     }
   };
+
+  // Local YYYY-MM-DD for the date input min attribute
+  const today = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  })();
 
   const getAvailabilityColor = (status) => {
     switch (status) {
@@ -416,9 +441,10 @@ const PropertyDetails = () => {
         <div className="mb-8">
           <div className="relative h-96 rounded-lg overflow-hidden">
             <img
-              src={property.images?.[0] || '/api/placeholder/800/400'}
+              src={property.images?.[0] || '/placeholder.svg'}
               alt={property.title}
               className="w-full h-full object-cover"
+              onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/placeholder.svg'; }}
             />
             {property.images && property.images.length > 0 && (
               <button
@@ -458,14 +484,18 @@ const PropertyDetails = () => {
                     )}
                   </div>
                   {(() => {
-                    const avg = reviews.length > 0 ? Math.round(reviews.reduce((acc, r) => acc + r.rating, 0) / reviews.length) : 0;
+                    // Prefer server-side aggregates; fall back to the loaded page of reviews
+                    const count = typeof property.totalReviews === 'number' ? property.totalReviews : reviews.length;
+                    const avg = typeof property.averageRating === 'number'
+                      ? Math.round(property.averageRating)
+                      : (reviews.length > 0 ? Math.round(reviews.reduce((acc, r) => acc + r.rating, 0) / reviews.length) : 0);
                     return (
                       <div className="flex items-center">
                         <div className="flex items-center mr-2">
                           {renderStars(avg)}
                         </div>
                         <span className="text-sm text-neutral-600 dark:text-neutral-400">
-                          {reviews.length > 0 ? `(${reviews.length} reviews)` : 'No reviews yet'}
+                          {count > 0 ? `(${count} review${count !== 1 ? 's' : ''})` : 'No reviews yet'}
                         </span>
                         <button
                           onClick={() => navigate(`/properties/${id}/reviews`)}
@@ -534,10 +564,12 @@ const PropertyDetails = () => {
                     <h3 className="font-medium text-neutral-900 dark:text-white">
                       {property.owner.name}
                     </h3>
-                    <div className="flex items-center text-neutral-600 dark:text-neutral-400 text-sm">
-                      <Mail className="h-4 w-4 mr-1" />
-                      {property.owner.email}
-                    </div>
+                    {property.owner.email && (
+                      <div className="flex items-center text-neutral-600 dark:text-neutral-400 text-sm">
+                        <Mail className="h-4 w-4 mr-1" />
+                        {property.owner.email}
+                      </div>
+                    )}
                     {property.owner.phone && (
                       <div className="flex items-center text-neutral-600 dark:text-neutral-400 text-sm">
                         <Phone className="h-4 w-4 mr-1" />
@@ -553,7 +585,7 @@ const PropertyDetails = () => {
                       <User className="h-4 w-4 mr-1" />
                       View Owner Profile
                     </button>
-                    {(!user || String(property.owner?._id || property.owner) !== String(user?._id || user?.id)) && (
+                    {!isOwner && (
                       <button
                         onClick={handleMessageOwner}
                         className="inline-flex items-center justify-center px-3 py-1.5 rounded-md border border-cyan-600 text-cyan-600 hover:bg-cyan-600 hover:text-white transition-colors text-sm font-medium"
@@ -573,7 +605,7 @@ const PropertyDetails = () => {
               <div className="bg-white dark:bg-neutral-800 rounded-lg shadow-md p-6">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-xl font-semibold text-neutral-900 dark:text-white">
-                    Reviews ({reviews.length})
+                    Reviews ({property.totalReviews ?? reviews.length})
                   </h2>
                 </div>
                 <div className="space-y-4">
@@ -598,13 +630,13 @@ const PropertyDetails = () => {
                     </div>
                   ))}
                 </div>
-                {reviews.length > 3 && (
+                {(property.totalReviews ?? reviews.length) > 3 && (
                   <div className="mt-4 text-center">
                     <button
                       onClick={() => navigate(`/properties/${id}/reviews`)}
                       className="inline-flex items-center px-4 py-2 rounded-md bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-medium transition-colors"
                     >
-                      View All Reviews ({reviews.length})
+                      View All Reviews ({property.totalReviews ?? reviews.length})
                     </button>
                   </div>
                 )}
@@ -616,7 +648,7 @@ const PropertyDetails = () => {
           <div className="lg:col-span-1">
             <div className="bg-white dark:bg-neutral-800 rounded-lg shadow-md p-6 sticky top-8 space-y-4">
               {/* Owner actions if current user owns this property */}
-              {user && (user.role === 'owner' || user.role === 'admin') && (String(property.owner?._id || property.owner) === String(user._id)) && (
+              {(isOwner || isAdmin) && (
                 <div>
                   <h2 className="text-xl font-semibold text-neutral-900 dark:text-white mb-4">Manage Listing</h2>
                   <div className="flex gap-3">
@@ -646,8 +678,8 @@ const PropertyDetails = () => {
                 </div>
               )}
 
-              {/* Booking card for guests and logged-in tenants, when property is Available */}
-              {(!user || String(property.owner?._id || property.owner) !== String(user._id || user.id)) && (
+              {/* Booking card for guests and logged-in tenants only (hidden for owners and admins) */}
+              {(!user || (user.role === 'tenant' && !isOwner)) && (
                 <div>
                   <h2 className="text-xl font-semibold text-neutral-900 dark:text-white mb-4">Book This Property</h2>
                   {(property.availabilityStatus || property.availability) === 'Available' ? (
@@ -711,9 +743,10 @@ const PropertyDetails = () => {
                   >
                     <div className="relative overflow-hidden rounded-t-xl">
                       <img
-                        src={property.images?.[0] || '/api/placeholder/400/300'}
+                        src={property.images?.[0] || '/placeholder.svg'}
                         alt={property.title}
                         className="w-full h-48 object-cover group-hover:scale-110 transition-transform duration-300"
+                        onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/placeholder.svg'; }}
                       />
                       <div className="absolute top-4 left-4">
                         {(() => {
@@ -794,7 +827,7 @@ const PropertyDetails = () => {
 
       {/* Booking Modal */}
       {showBookingModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/50flex items-center justify-center p-4 z-50">
           <div className="bg-white dark:bg-neutral-800 rounded-lg p-6 w-full max-w-md">
             <h3 className="text-lg font-semibold text-neutral-900 dark:text-white mb-4">
               Request Booking
@@ -808,6 +841,7 @@ const PropertyDetails = () => {
                   type="date"
                   value={bookingData.startDate}
                   onChange={(e) => setBookingData(prev => ({ ...prev, startDate: e.target.value }))}
+                  min={today}
                   required
                   className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-white focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
                 />
@@ -820,6 +854,7 @@ const PropertyDetails = () => {
                   type="date"
                   value={bookingData.endDate}
                   onChange={(e) => setBookingData(prev => ({ ...prev, endDate: e.target.value }))}
+                  min={bookingData.startDate || today}
                   required
                   className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-white focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
                 />
@@ -832,7 +867,8 @@ const PropertyDetails = () => {
                   value={bookingData.message}
                   onChange={(e) => setBookingData(prev => ({ ...prev, message: e.target.value }))}
                   rows={3}
-                  placeholder="Tell the owner why you'd like to book this property..."
+                  maxLength={500}
+                  placeholder="Tell the ownerwhy you'd like to book this property..."
                   className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-white focus:ring-2 focus:ring-cyan-500 focus:border-transparent resize-none"
                 />
               </div>
@@ -875,13 +911,13 @@ const PropertyDetails = () => {
             {/* Main image */}
             <div className="flex items-center justify-center px-4 pt-10 pb-3">
               <img
-                src={property.images?.[currentImageIndex] || '/api/placeholder/1200/800'}
+                src={property.images?.[currentImageIndex] || '/placeholder.svg'}
                 alt={property.title}
                 className="max-h-[65vh] w-auto max-w-full object-contain select-none"
                 loading="eager"
                 decoding="async"
                 referrerPolicy="no-referrer"
-                onError={(e) => { e.currentTarget.src = '/api/placeholder/1200/800'; }}
+                onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/placeholder.svg'; }}
               />
               {/* Prev/Next */}
               {property.images && property.images.length > 1 && (
@@ -919,7 +955,7 @@ const PropertyDetails = () => {
                         src={src}
                         alt={`${property.title} ${idx + 1}`}
                         className="h-20 w-28 object-cover rounded-sm"
-                        onError={(e) => { e.currentTarget.src = '/api/placeholder/200/140'; }}
+                        onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/placeholder.svg'; }}
                       />
                     </button>
                   ))}

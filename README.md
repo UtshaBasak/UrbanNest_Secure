@@ -49,7 +49,7 @@ UrbanNest Secure is a full-stack MERN application for renting residential proper
 - Request bookings and track their status
 - Review properties and rate owners
 - Submit leave (move-out) requests
-- Chat with owners. Messages are encrypted at rest with ECIES.
+- Chat with owners. Messages are encrypted at rest with ECIES, and each conversation key is itself RSA-encrypted.
 
 ### For owners
 
@@ -81,7 +81,8 @@ All primitives live in [`backend/crypto/`](backend/crypto) and are implemented b
 | [`eccMessageCrypto.js`](backend/crypto/eccMessageCrypto.js) | ECIES for chat: ephemeral ECDH + SHA-512 KDF + AES-256-GCM |
 | [`sha512.js`](backend/crypto/sha512.js) | SHA-512 hash and random salt generation |
 | [`cbc_mac.js`](backend/crypto/cbc_mac.js) | CBC-MAC built on SHA-512 for integrity checks |
-| [`sessionToken.js`](backend/crypto/sessionToken.js) | Session tokens: payload + CBC-MAC tag + RSA-wrapped per-session key |
+| [`sessionToken.js`](backend/crypto/sessionToken.js) | Session tokens: payload + length-prefixed CBC-MAC tag under a server-only key |
+| [`random.js`](backend/crypto/random.js) | Keys, salts, OTPs and IDs drawn from the platform CSPRNG (`crypto.getRandomValues`) |
 | [`keyManager.js`](backend/crypto/keyManager.js) | Key generation, persistence, caching and rotation, with private keys protected by an ECC-derived key |
 
 ### How the pieces fit together
@@ -89,10 +90,11 @@ All primitives live in [`backend/crypto/`](backend/crypto) and are implemented b
 1. **Encryption at rest.** Mongoose `pre('save')` hooks RSA-encrypt PII before a document is written. A `post('save')` hook then `$unset`s any plaintext fields, so only ciphertext stays in MongoDB.
 2. **Look-ups without plaintext.** An e-mail address is never stored in the clear. Users are found through a deterministic RSA **fingerprint** of the lower-cased address.
 3. **Password storage.** Passwords are salted with a random 16-byte salt and hashed with SHA-512.
-4. **Session management.** Access tokens (15 min) and refresh tokens (24 h) are issued as `HttpOnly`, `SameSite` cookies (`Secure` in production). Each token carries a CBC-MAC tag keyed by a fresh session key, and that key is RSA-encrypted inside the token. Tokens are bound to the client IP (enforced in production) and are added to a blocklist on logout.
-5. **Account protection.** Accounts lock after 5 failed logins, OTPs expire after 10 minutes and are stored only as hashes, passwords expire after 90 days, and auth endpoints are rate-limited.
+4. **Session management.** Access tokens (15 min) and refresh tokens (24 h) are issued as `HttpOnly`, `SameSite` cookies (`Secure` in production). Each token carries `iat`, `exp` and a random `jti`, and is authenticated with a CBC-MAC whose key is derived from the server's RSA private key, so only the server can mint one. Refresh tokens are single-use and rotate on every refresh. Tokens are bound to the client IP (enforced in production), are blocklisted on logout, and stop working when the password changes.
+5. **Account protection.** Accounts lock after 5 failed logins. OTPs expire after 10 minutes, are stored only as salted SHA-512 hashes, are destroyed after 5 wrong guesses, and email-change codes are bound to the requesting account. Passwords expire after 90 days, and auth and password-check endpoints are rate-limited.
 6. **Transport hardening.** Helmet security headers, a CORS allow-list, request validation with `express-validator`, and HTTPS redirection in production.
-7. **Key separation.** Separate key pairs are used for user data, OTPs and sessions, and each can be rotated independently.
+7. **Key separation.** Separate key pairs are used for user data, OTPs and sessions.
+8. **Privacy by default.** Public listings and profiles never include email addresses, phone numbers or who is renting a property. Signed-in users see an owner's contact details; a tenant's details are shown only to owners they have a booking with.
 
 ## Tech stack
 
@@ -271,6 +273,7 @@ This project is for learning, and the trade-offs are documented on purpose:
 
 - **Hand-rolled cryptography is not production-grade.** The implementations show how the algorithms work, but they have not been audited and are not constant-time. A real deployment should use vetted libraries such as Node's `crypto` module or libsodium.
 - **RSA keys are 512-bit by default** so key generation in pure `BigInt` stays fast. That size is far below modern recommendations (≥ 2048-bit). The size is set in `initializeAllKeys()` in [`keyManager.js`](backend/crypto/keyManager.js).
+- **Encryption keys live in the same database as the data.** Private keys are wrapped with a key derived from the server ECC key, which is stored alongside them, so anyone with full database access can recover them. A production system would keep keys in a KMS or HSM. Key rotation exists in [`keyManager.js`](backend/crypto/keyManager.js) but is not exposed, because rotating the user-data key would also require re-encrypting all PII and recomputing email fingerprints.
 - **Chat uses AES-256-GCM from Node's built-in `crypto`** as the symmetric cipher inside ECIES. Key agreement and key derivation are still the from-scratch ECC and SHA-512.
 - **Passwords use one round of salted SHA-512.** That's fine for the exercise, but production systems should use a slow, memory-hard KDF such as Argon2id, scrypt or bcrypt.
 

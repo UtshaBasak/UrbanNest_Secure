@@ -22,7 +22,13 @@ export default function Compare() {
   const [properties, setProperties] = useState([null, null]);
 
   useEffect(() => {
-    const ids = JSON.parse(localStorage.getItem('compareProperties') || '[]');
+    let ids = [];
+    try {
+      const parsed = JSON.parse(localStorage.getItem('compareProperties') || '[]');
+      if (Array.isArray(parsed)) ids = parsed;
+    } catch {
+      // ignore corrupt localStorage data
+    }
     setCompareIds(ids.slice(-2));
   }, []);
 
@@ -42,10 +48,14 @@ export default function Compare() {
     fetchProps();
   }, [compareIds]);
 
+  // Works on the displayed slots, so a deleted/missing property can still be removed
   const removeFromCompare = (idx) => {
-    const ids = JSON.parse(localStorage.getItem('compareProperties') || '[]');
-    ids.splice(idx, 1);
-    localStorage.setItem('compareProperties', JSON.stringify(ids));
+    const ids = compareIds.filter((_, i) => i !== idx);
+    try {
+      localStorage.setItem('compareProperties', JSON.stringify(ids));
+    } catch {
+      // ignore localStorage errors
+    }
     setCompareIds(ids);
   };
 
@@ -58,8 +68,8 @@ export default function Compare() {
             <thead>
               <tr>
                 <th className="p-4 border-b border-r border-neutral-300 dark:border-neutral-700 text-left text-neutral-900 dark:text-white">Field</th>
-                <th className="p-4 border-b border-r border-neutral-300 dark:border-neutral-700 text-center text-neutral-900 dark:text-white">Property 1 {properties[0] && <button onClick={() => removeFromCompare(0)} className="ml-2 px-2 py-1 text-xs bg-red-500 text-white rounded-sm">Remove</button>}</th>
-                <th className="p-4 border-b border-neutral-300 dark:border-neutral-700 text-center text-neutral-900 dark:text-white">Property 2 {properties[1] && <button onClick={() => removeFromCompare(1)} className="ml-2 px-2 py-1 text-xs bg-red-500 text-white rounded-sm">Remove</button>}</th>
+                <th className="p-4 border-b border-r border-neutral-300 dark:border-neutral-700 text-center text-neutral-900 dark:text-white">Property 1 {compareIds[0] && <button onClick={() => removeFromCompare(0)} className="ml-2 px-2 py-1 text-xs bg-red-500 text-white rounded-sm">Remove</button>}</th>
+                <th className="p-4 border-b border-neutral-300 dark:border-neutral-700 text-center text-neutral-900 dark:text-white">Property 2 {compareIds[1] && <button onClick={() => removeFromCompare(1)} className="ml-2 px-2 py-1 text-xs bg-red-500 text-white rounded-sm">Remove</button>}</th>
               </tr>
             </thead>
             <tbody>

@@ -31,7 +31,15 @@ const ConversationSchema = new mongoose.Schema(
     }
   },
   {
-    timestamps: true
+    timestamps: true,
+    // Never serialize the conversation key pair
+    toJSON: {
+      transform: (doc, ret) => {
+        delete ret.eccPrivateKey;
+        delete ret.eccPublicKey;
+        return ret;
+      }
+    }
   }
 );
 

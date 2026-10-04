@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { getPropertiesByOwner, getMyBookings, getUserRatingSummary, getUser, listUserRatings } from '../utils/api';
-import { Calendar, MapPin, ChevronRight, Star } from 'lucide-react';
+import { getPropertiesByOwner, getUserRatingSummary, listUserRatings } from '../utils/api';
+import { MapPin, ChevronRight, Star } from 'lucide-react';
 
 const Section = ({ title, children }) => (
   <div className="bg-white dark:bg-neutral-800 rounded-lg shadow-md p-6">
@@ -16,46 +16,29 @@ const ProfileStatus = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [ownerProps, setOwnerProps] = useState([]);
-  const [bookings, setBookings] = useState([]);
   const [ratingSummary, setRatingSummary] = useState({ owner: { avg: 0, count: 0 }, tenant: { avg: 0, count: 0 } });
-  const [ownerDetails, setOwnerDetails] = useState({}); // Cache for owner details by property ID
   const [userRatings, setUserRatings] = useState([]);
   const isOwner = user?.role === 'owner';
   const isAdmin = user?.role === 'admin';
-
-  // Filters and UI state
-  const [search, setSearch] = useState('');
-  const [refreshKey, setRefreshKey] = useState(0);
-
-  // Tenant payment form state
-  const [payBookingId, setPayBookingId] = useState('');
-  const [payMonthName, setPayMonthName] = useState('');
-  const [payMonth, setPayMonth] = useState('');
-  const [payYear, setPayYear] = useState('');
-  const [payAmount, setPayAmount] = useState('');
-  const [payExpected, setPayExpected] = useState('');
-  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     const load = async () => {
       try {
         setLoading(true);
         const tasks = [];
-        let propsIdx = -1, bookingsIdx = -1, ratingIdx = -1, ratingsListIdx = -1;
+        let propsIdx = -1, ratingIdx = -1, ratingsListIdx = -1;
         
         // Skip property, booking, and rating data for admin users
         if (!isAdmin) {
           if (isOwner) {
             propsIdx = tasks.push(getPropertiesByOwner(user._id || user.id)) - 1;
           }
-          bookingsIdx = tasks.push(getMyBookings()) - 1;
           ratingIdx = tasks.push(getUserRatingSummary(user._id || user.id)) - 1;
           ratingsListIdx = tasks.push(listUserRatings(user._id || user.id)) - 1;
         }
         
         const res = await Promise.allSettled(tasks);
         if (propsIdx > -1) setOwnerProps(res[propsIdx].status === 'fulfilled' ? (res[propsIdx].value.data.properties || []) : []);
-        if (bookingsIdx > -1) setBookings(res[bookingsIdx].status === 'fulfilled' ? (res[bookingsIdx].value.data.bookings || []) : []);
         if (ratingIdx > -1) {
           const def = { owner: { avg: 0, count: 0 }, tenant: { avg: 0, count: 0 } };
           if (res[ratingIdx].status === 'fulfilled') {
@@ -72,33 +55,7 @@ const ProfileStatus = () => {
       }
     };
     if (user) load();
-  }, [user, isOwner, isAdmin, search, refreshKey]);
-
-  // Fetch owner details for properties
-  const fetchOwnerDetails = async (propertyId, ownerId) => {
-    if (!ownerId || ownerDetails[propertyId]) return;
-    try {
-      const response = await getUser(ownerId);
-      if (response?.data?.user) {
-        setOwnerDetails(prev => ({ ...prev, [propertyId]: response.data.user }));
-      }
-    } catch (error) {
-      console.error('Failed to fetch owner details:', error);
-    }
-  };
-
-  // Fetch owner details for all bookings
-  useEffect(() => {
-    if (!isOwner && !isAdmin && bookings.length > 0) {
-      bookings.forEach(booking => {
-        const propertyId = booking.property?._id;
-        const ownerId = booking.property?.owner?._id || booking.property?.owner;
-        if (propertyId && ownerId) {
-          fetchOwnerDetails(propertyId, ownerId);
-        }
-      });
-    }
-  }, [bookings, isOwner, isAdmin]);
+  }, [user, isOwner, isAdmin]);
 
   // No category grouping per requirement
   const ownerList = useMemo(() => (isOwner ? ownerProps : []), [ownerProps, isOwner]);
@@ -210,7 +167,9 @@ const ProfileStatus = () => {
                               </div>
                             </div>
                             <button
+                              type="button"
                               onClick={() => navigate(`/property/${p._id}`)}
+                              aria-label={`View ${p.title || 'property'}`}
                               className="ml-4 p-2 rounded-sm hover:bg-neutral-100 dark:hover:bg-neutral-700"
                             >
                               <ChevronRight className="h-5 w-5" />

@@ -31,13 +31,15 @@ const SearchBar = ({ placeholder, value, onChange, onSearch }) => (
     <input
       type="text"
       placeholder={placeholder}
+      aria-label={placeholder}
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      onKeyPress={(e) => e.key === 'Enter' && onSearch()}
+      onKeyDown={(e) => e.key === 'Enter' && onSearch()}
       className="w-full px-4 py-2 pl-10 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
     />
     <Search className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
     <button
+      type="button"
       onClick={onSearch}
       className="absolute right-2 top-1.5 px-3 py-1 bg-blue-500 text-white rounded-sm hover:bg-blue-600 transition-colors"
     >
@@ -46,18 +48,51 @@ const SearchBar = ({ placeholder, value, onChange, onSearch }) => (
   </div>
 );
 
+// Static class map so Tailwind can see every class at build time
+const STAT_COLORS = {
+  blue: { border: 'border-blue-500', text: 'text-blue-500' },
+  green: { border: 'border-green-500', text: 'text-green-500' },
+  purple: { border: 'border-purple-500', text: 'text-purple-500' },
+  orange: { border: 'border-orange-500', text: 'text-orange-500' },
+  red: { border: 'border-red-500', text: 'text-red-500' },
+  yellow: { border: 'border-yellow-500', text: 'text-yellow-500' },
+};
+
 // StatCard component defined outside to prevent re-creation on each render
-const StatCard = ({ title, value, icon: Icon, color = 'blue' }) => (
-  <div className={`bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md border-l-4 border-${color}-500`}>
-    <div className="flex items-center justify-between">
-      <div>
-        <p className="text-sm font-medium text-gray-600 dark:text-gray-400">{title}</p>
-        <p className="text-2xl font-bold text-gray-900 dark:text-white">{value}</p>
+const StatCard = ({ title, value, icon: Icon, color = 'blue' }) => {
+  const colors = STAT_COLORS[color] || STAT_COLORS.blue;
+  return (
+    <div className={`bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md border-l-4 ${colors.border}`}>
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium text-gray-600 dark:text-gray-400">{title}</p>
+          <p className="text-2xl font-bold text-gray-900 dark:text-white">{value}</p>
+        </div>
+        <Icon className={`h-8 w-8 ${colors.text}`} />
       </div>
-      <Icon className={`h-8 w-8 text-${color}-500`} />
     </div>
-  </div>
-);
+  );
+};
+
+// Max page size accepted by the list endpoints
+const LIST_LIMIT = 100;
+
+// Fetches one admin list (optionally filtered by a search term) and returns its items
+const fetchAdminList = async (type, search) => {
+  const params = { limit: LIST_LIMIT, search: search || undefined };
+  switch (type) {
+    case 'owners':
+      return (await getOwners(params)).data.owners || [];
+    case 'tenants':
+      return (await getTenants(params)).data.tenants || [];
+    case 'properties':
+      return (await getAdminProperties(params)).data.properties || [];
+    case 'reviews':
+      return (await getAdminReviews(params)).data.reviews || [];
+    default:
+      return [];
+  }
+};
 
 const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState('overview');
@@ -95,10 +130,10 @@ const AdminDashboard = () => {
       setLoading(true);
       const [statsRes, ownersRes, tenantsRes, propertiesRes, reviewsRes] = await Promise.allSettled([
         getAdminStats(),
-        getOwners(),
-        getTenants(),
-        getAdminProperties(),
-        getAdminReviews()
+        getOwners({ limit: LIST_LIMIT }),
+        getTenants({ limit: LIST_LIMIT }),
+        getAdminProperties({ limit: LIST_LIMIT }),
+        getAdminReviews({ limit: LIST_LIMIT })
       ]);
 
       setStats(statsRes.status === 'fulfilled' ? statsRes.value.data.stats : {});
@@ -156,27 +191,8 @@ const AdminDashboard = () => {
 
   const handleSearch = async (searchType) => {
     try {
-      const searchTerm = searchTerms[searchType];
-      let result;
-      
-      switch (searchType) {
-        case 'owners':
-          result = await getOwners({ search: searchTerm });
-          setData(prev => ({ ...prev, owners: result.data.owners }));
-          break;
-        case 'tenants':
-          result = await getTenants({ search: searchTerm });
-          setData(prev => ({ ...prev, tenants: result.data.tenants }));
-          break;
-        case 'properties':
-          result = await getAdminProperties({ search: searchTerm });
-          setData(prev => ({ ...prev, properties: result.data.properties }));
-          break;
-        case 'reviews':
-          result = await getAdminReviews({ search: searchTerm });
-          setData(prev => ({ ...prev, reviews: result.data.reviews }));
-          break;
-      }
+      const items = await fetchAdminList(searchType, searchTerms[searchType].trim());
+      setData(prev => ({ ...prev, [searchType]: items }));
     } catch (error) {
       console.error('Error searching:', error);
     }
@@ -196,40 +212,9 @@ const AdminDashboard = () => {
     // Set new timeout for debounced search
     searchTimeouts.current[type] = setTimeout(async () => {
       try {
-        if (value.trim()) {
-          let result;
-          switch (type) {
-            case 'owners':
-              result = await getOwners({ search: value });
-              setData(prev => ({ ...prev, owners: result.data.owners }));
-              break;
-            case 'tenants':
-              result = await getTenants({ search: value });
-              setData(prev => ({ ...prev, tenants: result.data.tenants }));
-              break;
-            case 'properties':
-              result = await getAdminProperties({ search: value });
-              setData(prev => ({ ...prev, properties: result.data.properties }));
-              break;
-          }
-        } else {
-          // If search term is empty, refetch all data for that type
-          let result;
-          switch (type) {
-            case 'owners':
-              result = await getOwners();
-              setData(prev => ({ ...prev, owners: result.data.owners }));
-              break;
-            case 'tenants':
-              result = await getTenants();
-              setData(prev => ({ ...prev, tenants: result.data.tenants }));
-              break;
-            case 'properties':
-              result = await getAdminProperties();
-              setData(prev => ({ ...prev, properties: result.data.properties }));
-              break;
-          }
-        }
+        // An empty search term refetches the full list for that type
+        const items = await fetchAdminList(type, value.trim());
+        setData(prev => ({ ...prev, [type]: items }));
       } catch (error) {
         console.error('Error searching:', error);
       }
@@ -363,6 +348,8 @@ const AdminDashboard = () => {
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                           <button
                             onClick={() => handleDeleteUser(owner._id, 'owner')}
+                            aria-label={`Delete owner ${owner.name || ''}`.trim()}
+                            title="Delete owner"
                             className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300"
                           >
                             <Trash2 className="h-4 w-4" />
@@ -443,6 +430,8 @@ const AdminDashboard = () => {
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                           <button
                             onClick={() => handleDeleteUser(tenant._id, 'tenant')}
+                            aria-label={`Delete tenant ${tenant.name || ''}`.trim()}
+                            title="Delete tenant"
                             className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300"
                           >
                             <Trash2 className="h-4 w-4" />
@@ -495,8 +484,9 @@ const AdminDashboard = () => {
                             <div className="shrink-0 h-10 w-10">
                               <img
                                 className="h-10 w-10 rounded-sm object-cover"
-                                src={property.images?.[0] || '/placeholder-property.jpg'}
+                                src={property.images?.[0] || '/placeholder.svg'}
                                 alt={property.title}
+                                onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/placeholder.svg'; }}
                               />
                             </div>
                             <div className="ml-4">
@@ -536,6 +526,8 @@ const AdminDashboard = () => {
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                           <button
                             onClick={() => handleDeleteProperty(property._id)}
+                            aria-label={`Delete property ${property.title || ''}`.trim()}
+                            title="Delete property"
                             className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300"
                           >
                             <Trash2 className="h-4 w-4" />
@@ -651,6 +643,7 @@ const AdminDashboard = () => {
                             onClick={() => handleDeleteReview(review._id, review.type)}
                             className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300"
                             title="Delete Review"
+                            aria-label="Delete review"
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>

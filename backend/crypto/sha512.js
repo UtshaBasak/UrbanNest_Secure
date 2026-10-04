@@ -3,6 +3,8 @@
  * No external crypto or built-in crypto APIs are used.
  */
 
+import { randomBytes } from './random.js';
+
 const MASK64 = (1n << 64n) - 1n;
 
 const K = [
@@ -141,13 +143,8 @@ export function sha512Hex(message) {
 }
 
 export function generateSalt(bytes = 16) {
-  const arr = new Uint8Array(bytes);
-  for (let i = 0; i < bytes; i++) {
-    const t = Date.now();
-    const r = Math.floor(Math.random() * 256);
-    const hr = typeof process !== 'undefined' && process.hrtime ? Number(process.hrtime.bigint() % 256n) : Math.floor(Math.random() * 256);
-    arr[i] = (r ^ (t & 0xff) ^ hr) & 0xff;
-  }
+  // Also used for session keys, so it must come from a CSPRNG
+  const arr = randomBytes(bytes);
   return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 

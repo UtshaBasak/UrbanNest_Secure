@@ -8,12 +8,15 @@ const PropertyReviewNew = () => {
   const { id } = useParams(); // property id
   const navigate = useNavigate();
   const { user } = useAuth();
+  const userId = user?._id || user?.id;
+  const userRole = user?.role;
 
   const [eligible, setEligible] = useState(false);
   const [checking, setChecking] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [property, setProperty] = useState(null);
+  const [alreadyReviewed, setAlreadyReviewed] = useState(false);
 
   const [rating, setRating] = useState(5);
   const [hoverRating, setHoverRating] = useState(0);
@@ -23,8 +26,10 @@ const PropertyReviewNew = () => {
     const init = async () => {
       try {
         setChecking(true);
+        setError('');
+        setAlreadyReviewed(false);
         // Must be logged-in tenant
-        if (!user || user.role !== 'tenant') {
+        if (!userId || userRole !== 'tenant') {
           setEligible(false);
           setError('Only tenants can review properties.');
           return;
@@ -34,9 +39,13 @@ const PropertyReviewNew = () => {
           getProperty(id)
         ]);
         setProperty(propRes?.data?.property || null);
-        const allowed = !!eligRes?.data?.canReview;
+        const reviewed = !!(eligRes?.data?.alreadyReviewed || eligRes?.data?.hasReviewed);
+        const allowed = !!eligRes?.data?.canReview && !reviewed;
         setEligible(allowed);
-        if (!allowed) {
+        if (reviewed) {
+          setAlreadyReviewed(true);
+          setError('You have already reviewed this property.');
+        } else if (!allowed) {
           setError('You are not eligible to review this property. You must have completed at least one booking.');
         }
       } catch (e) {
@@ -47,7 +56,7 @@ const PropertyReviewNew = () => {
       }
     };
     if (id) init();
-  }, [id, user?._id, user?.role]);
+  }, [id, userId, userRole]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -71,7 +80,13 @@ const PropertyReviewNew = () => {
       // Redirect to the property's reviews page
       navigate(`/properties/${id}/reviews`);
     } catch (e) {
-      setError(e?.message || 'Failed to submit review');
+      if (/already reviewed/i.test(e?.message || '')) {
+        setAlreadyReviewed(true);
+        setEligible(false);
+        setError('You have already reviewed this property.');
+      } else {
+        setError(e?.message || 'Failed to submit review');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -140,6 +155,14 @@ const PropertyReviewNew = () => {
             </div>
           )}
 
+          {alreadyReviewed ? (
+            <Link
+              to={`/properties/${id}/reviews`}
+              className="inline-flex items-center px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white font-medium rounded-lg transition-colors"
+            >
+              See your review
+            </Link>
+          ) : (
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
               <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">
@@ -187,6 +210,7 @@ const PropertyReviewNew = () => {
               </button>
             </div>
           </form>
+          )}
         </div>
       </div>
     </div>

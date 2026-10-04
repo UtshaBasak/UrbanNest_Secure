@@ -16,6 +16,17 @@ const otpSchema = new mongoose.Schema({
     required: true,
     enum: ['signup', 'forgot-password', 'email-change', '2fa-login'],
   },
+  // Account the code belongs to (email changes), so it cannot be used by another session
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null,
+  },
+  // Wrong guesses so far; the code is deleted after too many
+  attempts: {
+    type: Number,
+    default: 0,
+  },
   expiresAt: {
     type: Date,
     required: true,

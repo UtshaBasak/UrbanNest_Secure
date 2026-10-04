@@ -26,7 +26,7 @@ const registerValidation = [
     .customSanitizer(v => v.toLowerCase().trim()),
   body('password').isLength({ min: 12 }).withMessage('Password must be at least 12 characters'),
   body('phone').notEmpty().withMessage('Phone number is required'),
-  body('role').optional().isIn(['admin', 'owner', 'tenant']).withMessage('Invalid role'),
+  body('role').optional().isIn(['owner', 'tenant']).withMessage('Invalid role'),
 ];
 
 const loginValidation = [

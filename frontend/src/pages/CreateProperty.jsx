@@ -20,6 +20,51 @@ const defaultForm = {
   availabilityStatus: 'Available'
 };
 
+const MAX_IMAGES = 8;
+const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10MB per source file
+const MAX_IMAGE_DIMENSION = 1600; // px on the long side
+const JPEG_QUALITY = 0.8;
+
+// Load a File into an <img>, downscale it on a canvas and return a JPEG data URL
+const downscaleImage = (file) => new Promise((resolve, reject) => {
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    try {
+      const longSide = Math.max(img.naturalWidth, img.naturalHeight) || 1;
+      const scale = Math.min(1, MAX_IMAGE_DIMENSION / longSide);
+      const width = Math.max(1, Math.round(img.naturalWidth * scale));
+      const height = Math.max(1, Math.round(img.naturalHeight * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Canvas not supported');
+      // JPEG has no alpha channel; paint a white background first
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', JPEG_QUALITY));
+    } catch (err) {
+      reject(err);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  };
+  img.onerror = () => {
+    URL.revokeObjectURL(url);
+    reject(new Error(`Could not read image "${file.name}"`));
+  };
+  img.src = url;
+});
+
+// Returns undefined when empty, NaN when invalid / out of range
+const parseCoord = (value, min, max) => {
+  if (value === '' || value == null) return undefined;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= min && n <= max ? n : NaN;
+};
+
 const CreateProperty = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -45,23 +90,41 @@ const CreateProperty = () => {
     setForm((prev) => ({ ...prev, [name]: value === '' ? '' : Number(value) }));
   };
 
-  const toBase64 = (file) => new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-
   const handleFiles = async (e) => {
-    const files = Array.from(e.target.files || []);
+    const input = e.target;
+    const files = Array.from(input.files || []);
+    // Reset so selecting the same file again still triggers onChange
+    input.value = '';
     if (!files.length) return;
+
+    const nonImages = files.filter((f) => !f.type || !f.type.startsWith('image/'));
+    if (nonImages.length) {
+      setError(`Only image files are allowed (${nonImages.map((f) => f.name).join(', ')})`);
+      return;
+    }
+    const tooBig = files.filter((f) => f.size > MAX_FILE_BYTES);
+    if (tooBig.length) {
+      setError(`Each image must be 10MB or smaller (${tooBig.map((f) => f.name).join(', ')})`);
+      return;
+    }
+    const remaining = MAX_IMAGES - uploadedPreviews.length;
+    if (remaining <= 0) {
+      setError(`You can upload at most ${MAX_IMAGES} images`);
+      return;
+    }
+    if (files.length > remaining) {
+      setError(`You can upload at most ${MAX_IMAGES} images (${remaining} more allowed)`);
+      return;
+    }
+
     try {
       setUploading(true);
-      const bases = await Promise.all(files.map(toBase64));
-      setUploadedPreviews((prev) => [...prev, ...bases]);
+      setError('');
+      const bases = await Promise.all(files.map(downscaleImage));
+      setUploadedPreviews((prev) => [...prev, ...bases].slice(0, MAX_IMAGES));
     } catch (err) {
-      console.error('Image read failed', err);
-      setError('Failed to read selected images');
+      console.error('Image processing failed', err);
+      setError(err?.message || 'Failed to read selected images');
     } finally {
       setUploading(false);
     }
@@ -80,6 +143,26 @@ const CreateProperty = () => {
       return;
     }
 
+    const price = Number(form.price);
+    if (form.price === '' || !Number.isFinite(price) || price <= 0) {
+      setError('Please enter a valid rent greater than 0');
+      return;
+    }
+    const latitude = parseCoord(form.latitude, -90, 90);
+    const longitude = parseCoord(form.longitude, -180, 180);
+    if (Number.isNaN(latitude)) {
+      setError('Latitude must be a number between -90 and 90');
+      return;
+    }
+    if (Number.isNaN(longitude)) {
+      setError('Longitude must be a number between -180 and 180');
+      return;
+    }
+    if (uploadedPreviews.length > MAX_IMAGES) {
+      setError(`You can upload at most ${MAX_IMAGES} images`);
+      return;
+    }
+
     try {
       setSubmitting(true);
       setError('');
@@ -87,10 +170,10 @@ const CreateProperty = () => {
       const payload = {
         title: form.title,
         description: form.description,
-        price: Number(form.price),
+        price,
         location: form.location,
-        latitude: form.latitude ? Number(form.latitude) : undefined,
-        longitude: form.longitude ? Number(form.longitude) : undefined,
+        latitude,
+        longitude,
         size: Number(form.size),
         bedrooms: Number(form.bedrooms),
         bathrooms: Number(form.bathrooms),
@@ -110,7 +193,11 @@ const CreateProperty = () => {
       }
     } catch (err) {
       console.error('Create property failed:', err);
-      setError(err.message || 'Failed to create property');
+      if (err?.status === 413 || /too large/i.test(err?.message || '')) {
+        setError('Your images are too large to upload. Please remove some images or use smaller ones and try again.');
+      } else {
+        setError(err?.message || 'Failed to create property');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -148,7 +235,7 @@ const CreateProperty = () => {
             </div>
             <div>
               <label className="block text-sm text-neutral-800 dark:text-neutral-200 mb-1">Rent (per month)</label>
-              <input type="number" min="0" name="price" value={form.price} onChange={handleNumber} required className="w-full p-2 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-400 focus:outline-hidden focus:ring-2 focus:ring-cyan-600" />
+              <input type="number" min="0" step="any" name="price" value={form.price} onChange={handleNumber} required className="w-full p-2 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-400 focus:outline-hidden focus:ring-2 focus:ring-cyan-600" />
             </div>
             <div className="md:col-span-2">
               <label className="block text-sm text-neutral-800 dark:text-neutral-200 mb-1">Description</label>
@@ -156,17 +243,17 @@ const CreateProperty = () => {
             </div>
             <div>
               <label className="block text-sm text-neutral-800 dark:text-neutral-200 mb-1">Location</label>
-              <input name="location" value={form.location} onChange={handleChange} placeholder="e.g., Dhaka, Bangladesh" className="w-full p-2 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-400 focus:outline-hidden focus:ring-2 focus:ring-cyan-600" />
+              <input name="location" value={form.location} onChange={handleChange} required placeholder="e.g., Dhaka, Bangladesh" className="w-full p-2 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-400 focus:outline-hidden focus:ring-2 focus:ring-cyan-600" />
             </div>
             {/* Property Location segment removed as requested */}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm text-neutral-800 dark:text-neutral-200 mb-1">Latitude</label>
-                <input name="latitude" value={form.latitude} onChange={handleChange} placeholder="e.g., 23.8103" className="w-full p-2 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-400 focus:outline-hidden focus:ring-2 focus:ring-cyan-600" />
+                <input type="number" step="any" min={-90} max={90} name="latitude" value={form.latitude} onChange={handleChange} placeholder="e.g., 23.8103" className="w-full p-2 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-400 focus:outline-hidden focus:ring-2 focus:ring-cyan-600" />
               </div>
               <div>
                 <label className="block text-sm text-neutral-800 dark:text-neutral-200 mb-1">Longitude</label>
-                <input name="longitude" value={form.longitude} onChange={handleChange} placeholder="e.g., 90.4125" className="w-full p-2 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-400 focus:outline-hidden focus:ring-2 focus:ring-cyan-600" />
+                <input type="number" step="any" min={-180} max={180} name="longitude" value={form.longitude} onChange={handleChange} placeholder="e.g., 90.4125" className="w-full p-2 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-400 focus:outline-hidden focus:ring-2 focus:ring-cyan-600" />
               </div>
             </div>
             <div>
@@ -201,8 +288,8 @@ const CreateProperty = () => {
               <input type="number" min={0} name="bathrooms" value={form.bathrooms} onChange={handleNumber} className="w-full p-2 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-400 focus:outline-hidden focus:ring-2 focus:ring-cyan-600" />
             </div>
             <div className="md:col-span-2">
-              <label className="block text-sm text-neutral-800 dark:text-neutral-200 mb-1">Upload Images</label>
-              <input type="file" accept="image/*" multiple onChange={handleFiles} className="block w-full text-sm text-neutral-700 dark:text-neutral-200 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-cyan-50 file:text-cyan-700 dark:file:bg-neutral-700 dark:file:text-neutral-100 transition file:transition file:duration-200 hover:file:bg-cyan-100 dark:hover:file:bg-neutral-600" />
+              <label className="block text-sm text-neutral-800 dark:text-neutral-200 mb-1">Upload Images <span className="text-neutral-500 dark:text-neutral-400">({uploadedPreviews.length}/{MAX_IMAGES})</span></label>
+              <input type="file" accept="image/*" multiple onChange={handleFiles} disabled={uploading || uploadedPreviews.length >= MAX_IMAGES} className="block w-full text-sm text-neutral-700 dark:text-neutral-200 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-cyan-50 file:text-cyan-700 dark:file:bg-neutral-700 dark:file:text-neutral-100 transition file:transition file:duration-200 hover:file:bg-cyan-100 dark:hover:file:bg-neutral-600" />
               {uploadedPreviews.length > 0 && (
                 <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
                   {uploadedPreviews.map((src, idx) => (

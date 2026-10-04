@@ -47,7 +47,16 @@ const getBookingStatusColor = (status) => {
 const UserDashboard = () => {
   const { user } = useAuth();
   const location = useLocation();
-  const [activeTab, setActiveTab] = useState('overview');
+  // Tab selection: an explicit click wins until the ?tab= query changes;
+  // otherwise use a valid ?tab= value, falling back to the role's default tab.
+  const [tabSelection, setTabSelection] = useState({ search: location.search, tab: null });
+  const validTabs = user?.role === 'owner' ? ['properties', 'bookings', 'reviews'] : ['bookings', 'reviews'];
+  const tabParam = new URLSearchParams(location.search).get('tab');
+  const activeTab =
+    (tabSelection.search === location.search && tabSelection.tab) ||
+    (validTabs.includes(tabParam) ? tabParam : null) ||
+    (user?.role === 'owner' ? 'properties' : 'bookings');
+  const setActiveTab = (tab) => setTabSelection({ search: location.search, tab });
   const [data, setData] = useState({
     properties: [],
     bookings: [],
@@ -61,13 +70,6 @@ const UserDashboard = () => {
     totalReviews: 0
   });
 
-  // Read query params for deep-link: tab
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const tab = params.get('tab');
-    if (tab) setActiveTab(tab);
-  }, [location.search]);
-
   useEffect(() => {
     if (user) {
       fetchDashboardData();
@@ -80,41 +82,50 @@ const UserDashboard = () => {
       const promises = [];
 
       if (user.role === 'owner') {
-        promises.push(getPropertiesByOwner(user._id || user.id));
-        promises.push(getMyBookings());
-        promises.push(getMyPropertiesReviews()); // Get reviews for owner's properties
-        promises.push(getMyBookings({ status: 'approved' })); // Get only approved bookings for count
+        promises.push(getPropertiesByOwner(user._id || user.id, { limit: 100 }));
+        promises.push(getMyBookings({ limit: 100 }));
+        promises.push(getMyPropertiesReviews({ limit: 100 })); // Get reviews for owner's properties
+        promises.push(getMyBookings({ status: 'approved', limit: 1 })); // Only the approved total is needed
       } else {
-        promises.push(getMyBookings());
-        promises.push(getMyReviews()); // Get reviews written by tenant
-        promises.push(getMyBookings({ status: 'approved' })); // Get only approved bookings for count
+        promises.push(getMyBookings({ limit: 100 }));
+        promises.push(getMyReviews({ limit: 100 })); // Get reviews written by tenant
+        promises.push(getMyBookings({ status: 'approved', limit: 1 })); // Only the approved total is needed
       }
 
       const results = await Promise.allSettled(promises);
       
-      let properties = [];
-      let bookings = [];
-      let reviews = [];
-      let approvedBookings = [];
+      // Extract a list plus its total (prefers the server's pagination.total)
+      const read = (result, key) => {
+        if (result?.status !== 'fulfilled') return { items: [], total: 0 };
+        const payload = result.value?.data || {};
+        const items = payload[key] || [];
+        const total = payload.pagination?.total;
+        return { items, total: typeof total === 'number' ? total : items.length };
+      };
+
+      let properties = { items: [], total: 0 };
+      let bookings;
+      let reviews;
+      let approvedBookings;
 
       if (user.role === 'owner') {
-        properties = results[0].status === 'fulfilled' ? results[0].value.data.properties || [] : [];
-        bookings = results[1].status === 'fulfilled' ? results[1].value.data.bookings || [] : [];
-        reviews = results[2].status === 'fulfilled' ? results[2].value.data.reviews || [] : [];
-        approvedBookings = results[3].status === 'fulfilled' ? results[3].value.data.bookings || [] : [];
+        properties = read(results[0], 'properties');
+        bookings = read(results[1], 'bookings');
+        reviews = read(results[2], 'reviews');
+        approvedBookings = read(results[3], 'bookings');
       } else {
-        bookings = results[0].status === 'fulfilled' ? results[0].value.data.bookings || [] : [];
-        reviews = results[1].status === 'fulfilled' ? results[1].value.data.reviews || [] : [];
-        approvedBookings = results[2].status === 'fulfilled' ? results[2].value.data.bookings || [] : [];
+        bookings = read(results[0], 'bookings');
+        reviews = read(results[1], 'reviews');
+        approvedBookings = read(results[2], 'bookings');
       }
 
-      setData({ properties, bookings, reviews });
-      
+      setData({ properties: properties.items, bookings: bookings.items, reviews: reviews.items });
+
       // Calculate stats
       setStats({
-        totalProperties: properties.length,
-        totalBookings: approvedBookings.length, // Only count approved bookings
-        totalReviews: reviews.length
+        totalProperties: properties.total,
+        totalBookings: approvedBookings.total, // Only count approved bookings
+        totalReviews: reviews.total
       });
 
     } catch (error) {
@@ -398,8 +409,9 @@ const UserDashboard = () => {
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-4">
                           <img
-                            src={property.images?.[0] || '/api/placeholder/100/100'}
+                            src={property.images?.[0] || '/placeholder.svg'}
                             alt={property.title}
+                            onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/placeholder.svg'; }}
                             className="w-16 h-16 object-cover rounded-lg"
                           />
                           <div>
@@ -422,18 +434,24 @@ const UserDashboard = () => {
                         <div className="flex items-center space-x-2">
                           <Link
                             to={`/properties/${property._id}`}
+                            aria-label="View property"
+                            title="View property"
                             className="p-2 text-neutral-600 dark:text-neutral-400 hover:text-cyan-600 dark:hover:text-cyan-400"
                           >
                             <Eye className="h-4 w-4" />
                           </Link>
                           <Link
                             to={`/properties/${property._id}/edit`}
+                            aria-label="Edit property"
+                            title="Edit property"
                             className="p-2 text-neutral-600 dark:text-neutral-400 hover:text-blue-600 dark:hover:text-blue-400"
                           >
                             <Edit className="h-4 w-4" />
                           </Link>
                           <button
                             onClick={() => handleDeleteProperty(property._id)}
+                            aria-label="Delete property"
+                            title="Delete property"
                             className="p-2 text-neutral-600 dark:text-neutral-400 hover:text-red-600 dark:hover:text-red-400"
                           >
                             <Trash2 className="h-4 w-4" />
@@ -458,17 +476,29 @@ const UserDashboard = () => {
                   </div>
                 ) : (
                   data.bookings.map((booking) => {
+                    const counterpartId = user?.role === 'owner'
+                      ? booking.tenant?._id || booking.tenant?.id
+                      : booking.property?.owner?._id || booking.property?.owner?.id;
+                    const counterpartName = user?.role === 'owner'
+                      ? `${booking.tenant?.name || booking.tenant?.fullName || booking.tenant?.email || 'Tenant'}`
+                      : `${booking.property?.owner?.name || booking.property?.owner?.fullName || booking.property?.ownerName || booking.property?.owner?.email || 'Owner'}`;
                     return (
                       <div key={booking._id} className="border border-neutral-200 dark:border-neutral-700 rounded-lg p-4">
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
                             <div className="flex items-center gap-2 mb-2">
-                              <Link 
-                                to={`/properties/${booking.property?._id}`}
-                                className="font-medium text-neutral-900 dark:text-white hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors"
-                              >
-                                {booking.property?.title || 'Property'}
-                              </Link>
+                              {booking.property?._id ? (
+                                <Link
+                                  to={`/properties/${booking.property._id}`}
+                                  className="font-medium text-neutral-900 dark:text-white hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors"
+                                >
+                                  {booking.property?.title || 'Property'}
+                                </Link>
+                              ) : (
+                                <span className="font-medium text-neutral-500 dark:text-neutral-400">
+                                  {booking.property?.title || 'Property unavailable'}
+                                </span>
+                              )}
                               <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                                 getBookingStatusColor(booking.status)
                               }`}>
@@ -481,14 +511,16 @@ const UserDashboard = () => {
                                 <span className="font-medium text-neutral-700 dark:text-neutral-300">
                                   {user?.role === 'owner' ? 'Tenant:' : 'Owner:'}
                                 </span>
-                                <Link 
-                                  to={`/users/${user?.role === 'owner' ? booking.tenant?._id || booking.tenant?.id : booking.property?.owner?._id || booking.property?.owner?.id}`}
-                                  className="block text-cyan-600 dark:text-cyan-400 hover:underline mt-1"
-                                >
-                                  {user?.role === 'owner'
-                                    ? `${booking.tenant?.name || booking.tenant?.fullName || booking.tenant?.email || 'Tenant'}`
-                                    : `${booking.property?.owner?.name || booking.property?.owner?.fullName || booking.property?.ownerName || booking.property?.owner?.email || 'Owner'}`}
-                                </Link>
+                                {counterpartId ? (
+                                  <Link
+                                    to={`/users/${counterpartId}`}
+                                    className="block text-cyan-600 dark:text-cyan-400 hover:underline mt-1"
+                                  >
+                                    {counterpartName}
+                                  </Link>
+                                ) : (
+                                  <span className="block text-neutral-600 dark:text-neutral-400 mt-1">{counterpartName}</span>
+                                )}
                               </div>
                               <div>
                                 <span className="font-medium text-neutral-700 dark:text-neutral-300">Booking Period:</span>
@@ -508,7 +540,7 @@ const UserDashboard = () => {
                             )}
                           </div>
                           <div className="flex items-center space-x-2">
-                            {user?.role === 'tenant' && booking.status === 'approved' && (
+                            {user?.role === 'tenant' && booking.status === 'approved' && booking.property?._id && (
                               <>
                                 <Link
                                   to={`/leave-requests/new?bookingId=${booking._id}`}
@@ -534,6 +566,7 @@ const UserDashboard = () => {
                                   onClick={() => handleBookingStatusUpdate(booking._id, 'approved')}
                                   className="p-1 text-green-600 hover:text-green-700"
                                   title="Approve"
+                                  aria-label="Approve booking"
                                 >
                                   <CheckCircle className="h-4 w-4" />
                                 </button>
@@ -541,6 +574,7 @@ const UserDashboard = () => {
                                   onClick={() => handleBookingStatusUpdate(booking._id, 'rejected')}
                                   className="p-1 text-red-600 hover:text-red-700"
                                   title="Reject"
+                                  aria-label="Reject booking"
                                 >
                                   <XCircle className="h-4 w-4" />
                                 </button>
@@ -551,6 +585,7 @@ const UserDashboard = () => {
                               onClick={() => handleDeleteBooking(booking._id)}
                               className="p-1 text-red-600 hover:text-red-700"
                               title="Delete Booking"
+                              aria-label="Delete booking"
                             >
                               <Trash2 className="h-4 w-4" />
                             </button>
@@ -618,6 +653,7 @@ const UserDashboard = () => {
                             }}
                             className="p-1 text-red-600 hover:text-red-700"
                             title="Delete Review"
+                            aria-label="Delete review"
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
