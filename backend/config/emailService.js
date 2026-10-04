@@ -7,7 +7,7 @@ function getTransporter() {
     transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: {
-        user: process.env.EMAIL_USER || 'utsha.basak.v2@gmail.com',
+        user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
       },
     });
@@ -57,7 +57,7 @@ export async function sendOtpEmail(toEmail, otp, purpose) {
   `;
 
   const mailOptions = {
-    from: `"UrbanNest" <${process.env.EMAIL_USER || 'utsha.basak.v2@gmail.com'}>`,
+    from: `"UrbanNest" <${process.env.EMAIL_USER}>`,
     to: toEmail,
     subject: `Your OTP for UrbanNest ${label} is here!`,
     html,

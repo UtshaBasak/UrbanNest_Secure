@@ -26,7 +26,7 @@ const ForceChangePassword = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (newPw.length < 12) { setError('Password must be at least 12 characters'); return; }
-    if (!/[a-z]/.test(newPw) || !/[A-Z]/.test(newPw) || !/[0-9]/.test(newPw) || !/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(newPw)) {
+    if (!/[a-z]/.test(newPw) || !/[A-Z]/.test(newPw) || !/[0-9]/.test(newPw) || !/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(newPw)) {
       setError('Password must meet all complexity requirements'); return;
     }
     if (newPw !== confirmPw) { setError('Passwords do not match'); return; }

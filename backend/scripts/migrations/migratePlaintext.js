@@ -1,12 +1,10 @@
-import dotenv from 'dotenv';
+import '../../config/env.js';
 import mongoose from 'mongoose';
-import connectDB from '../config/db.js';
-import User from '../models/User.js';
-import Otp from '../models/Otp.js';
-import { initializeAllKeys, getPublicKey } from '../crypto/keyManager.js';
-import { fingerprint } from '../crypto/rsa.js';
-
-dotenv.config();
+import connectDB from '../../config/db.js';
+import User from '../../models/User.js';
+import Otp from '../../models/Otp.js';
+import { initializeAllKeys, getPublicKey } from '../../crypto/keyManager.js';
+import { fingerprint } from '../../crypto/rsa.js';
 
 async function migrate() {
   try {

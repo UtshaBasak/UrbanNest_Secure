@@ -17,7 +17,7 @@ function checkPasswordRules(pw) {
     hasLower: /[a-z]/.test(pw),
     hasUpper: /[A-Z]/.test(pw),
     hasDigit: /[0-9]/.test(pw),
-    hasSpecial: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(pw),
+    hasSpecial: /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(pw),
   };
 }
 

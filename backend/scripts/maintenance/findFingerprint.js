@@ -1,16 +1,14 @@
-import dotenv from 'dotenv';
+import '../../config/env.js';
 import mongoose from 'mongoose';
-import connectDB from '../config/db.js';
-import { initializeAllKeys, getPublicKey } from '../crypto/keyManager.js';
-import { fingerprint } from '../crypto/rsa.js';
-import User from '../models/User.js';
-
-dotenv.config({ path: '../.env' });
+import connectDB from '../../config/db.js';
+import { initializeAllKeys, getPublicKey } from '../../crypto/keyManager.js';
+import { fingerprint } from '../../crypto/rsa.js';
+import User from '../../models/User.js';
 
 async function run() {
   const email = process.argv[2];
   if (!email) {
-    console.error('Usage: node scripts/findFingerprint.js <email>');
+    console.error('Usage: npm run script:fingerprint -- <email>');
     process.exit(2);
   }
   try {

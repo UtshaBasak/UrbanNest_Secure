@@ -1,16 +1,8 @@
+import '../../config/env.js';
 import mongoose from 'mongoose';
-import dotenv from 'dotenv';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-// Setup environment
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-dotenv.config({ path: path.join(__dirname, '../../.env') });
-
-import Property from '../models/Property.js';
-import { initializeAllKeys } from '../crypto/keyManager.js';
-import connectDB from '../config/db.js';
+import Property from '../../models/Property.js';
+import { initializeAllKeys } from '../../crypto/keyManager.js';
+import connectDB from '../../config/db.js';
 
 const migrateProperties = async () => {
   try {

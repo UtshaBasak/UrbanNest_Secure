@@ -306,12 +306,6 @@ export const login = async (req, res) => {
       return res.status(423).json({ message: `Account locked due to too many failed attempts. Try again in ${remaining} minute(s).`, locked: true, remainingMinutes: remaining });
     }
 
-    // Admin role auto-assign
-    if (email === 'utsha.basak.v2@gmail.com' && user.role !== 'admin') {
-      user.role = 'admin';
-      await user.save();
-    }
-
     const isPasswordValid = await user.comparePassword(password);
     if (!isPasswordValid) {
       await user.incrementLoginAttempts();
@@ -321,6 +315,13 @@ export const login = async (req, res) => {
 
     // Reset failed attempts on success
     await user.resetLoginAttempts();
+
+    // Promote the configured admin account (only after the password is verified)
+    const adminEmail = (process.env.ADMIN_EMAIL || '').toLowerCase();
+    if (adminEmail && email.toLowerCase() === adminEmail && user.role !== 'admin') {
+      user.role = 'admin';
+      await user.save();
+    }
 
     // Two-factor authentication check
     if (user.twoFactorEnabled) {

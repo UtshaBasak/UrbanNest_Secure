@@ -132,32 +132,6 @@ NOTE: If you see 'Unknown at rule @tailwind' or '@apply' errors, ensure your bui
   @apply shadow-md transform -translate-y-1;
 }
 
-/* Leaflet map styles */
-.leaflet-container {
-  @apply rounded-lg;
-  width: 100% !important;
-  height: 100% !important;
-  position: relative !important;
-  z-index: 1;
-}
-
-.leaflet-container.leaflet-touch-drag.leaflet-touch-zoom {
-  position: relative !important;
-}
-
-.leaflet-popup-content-wrapper {
-  @apply rounded-lg;
-}
-
-.dark .leaflet-popup-content-wrapper {
-  background-color: #262626;
-  color: white;
-}
-
-.dark .leaflet-popup-tip {
-  background-color: #262626;
-}
-
 /* Loading spinner */
 .spinner {
   @apply inline-block w-6 h-6 border-2 border-current border-t-transparent rounded-full animate-spin;

@@ -1,13 +1,13 @@
+// Must be the first import so env vars are set before other modules load
+import './config/env.js';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import mongoose from 'mongoose';
 import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
-import dotenv from 'dotenv';
 
 // Import routes
 import authRoutes from './routes/authRoutes.js';
@@ -24,9 +24,6 @@ import chatRoutes from './routes/chatRoutes.js';
 // Import config
 import connectDB from './config/db.js';
 import { initializeAllKeys } from './crypto/keyManager.js';
-
-// Load environment variables from root directory
-dotenv.config({ path: '../.env' });
 
 // Connect to database and initialize encryption keys
 const startServer = async () => {
@@ -126,18 +123,19 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-// Global error handler
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ 
-    message: 'Something went wrong!', 
-    error: process.env.NODE_ENV === 'development' ? err.message : {} 
-  });
-});
-
 // 404 handler
 app.use('*', (req, res) => {
   res.status(404).json({ message: 'Route not found' });
+});
+
+// Global error handler (must be registered last)
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(err.status || 500).json({
+    message: 'Something went wrong!',
+    error: process.env.NODE_ENV === 'development' ? err.message : {}
+  });
 });
 
 const PORT = process.env.PORT || 5000;
@@ -145,7 +143,6 @@ const PORT = process.env.PORT || 5000;
 startServer().then(() => {
   const server = app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
-    // console.log(`Environment: ${process.env.NODE_ENV}`);
   });
 
   server.on('error', (err) => {

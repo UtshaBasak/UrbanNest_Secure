@@ -1,54 +1,65 @@
+import '../config/env.js';
 import mongoose from 'mongoose';
-import dotenv from 'dotenv';
+import connectDB from '../config/db.js';
 import User from '../models/User.js';
 import { fingerprint } from '../crypto/rsa.js';
-import { getPublicKey } from '../crypto/keyManager.js';
+import { initializeAllKeys, getPublicKey } from '../crypto/keyManager.js';
 
-dotenv.config();
+/**
+ * Creates (or promotes) the administrator account.
+ *
+ * Credentials are read from ADMIN_EMAIL / ADMIN_PASSWORD in the root `.env`
+ * and fall back to development defaults. Always set your own values before
+ * running this against a shared or production database.
+ *
+ * Usage: npm run create-admin   (from backend/)
+ */
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'admin@gmail.com').toLowerCase();
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
+const ADMIN_NAME = process.env.ADMIN_NAME || 'Admin User';
 
 const createAdminUser = async () => {
   try {
-    // Connect to MongoDB
-    await mongoose.connect(process.env.MONGO_URI);
-    console.log('Connected to MongoDB');
+    await connectDB();
+    // Keys must be loaded before fingerprinting or encrypting any PII
+    await initializeAllKeys();
 
-    // Check if admin user already exists
     // Lookup by fingerprint to avoid relying on plaintext email storage
     const pubKey = getPublicKey('user-data');
-    const fpAdmin = fingerprint('admin@gmail.com', pubKey);
+    const fpAdmin = fingerprint(ADMIN_EMAIL, pubKey);
     const existingAdmin = await User.findOne({ emailFingerprint: fpAdmin });
-    
+
     if (existingAdmin) {
-      const adminObj = typeof existingAdmin.getDecryptedData === 'function' ? existingAdmin.getDecryptedData() : existingAdmin.toJSON();
-      console.log('Admin user already exists:', adminObj.email);
+      console.log('Admin user already exists:', ADMIN_EMAIL);
       if (existingAdmin.role !== 'admin') {
         existingAdmin.role = 'admin';
         await existingAdmin.save();
         console.log('Updated existing user to admin role');
       }
     } else {
-      // Create admin user
       const adminUser = new User({
-        name: 'Admin User',
-        email: 'admin@gmail.com',
-        password: 'admin123', // This will be hashed by the pre-save middleware
-        phone: '+1234567890',
+        name: ADMIN_NAME,
+        email: ADMIN_EMAIL,
+        password: ADMIN_PASSWORD, // hashed by the pre-save middleware
+        phone: process.env.ADMIN_PHONE || '+1234567890',
         role: 'admin',
+        isEmailVerified: true,
         profileImage: ''
       });
 
       await adminUser.save();
-      const createdObj = typeof adminUser.getDecryptedData === 'function' ? adminUser.getDecryptedData() : adminUser.toJSON();
-      console.log('Admin user created successfully:', createdObj.email);
+      console.log('Admin user created successfully:', ADMIN_EMAIL);
+      if (!process.env.ADMIN_PASSWORD) {
+        console.warn('Using the default development password. Change it after first login.');
+      }
     }
 
     console.log('Admin setup completed');
-    
   } catch (error) {
     console.error('Error setting up admin user:', error);
+    process.exitCode = 1;
   } finally {
     await mongoose.disconnect();
-    process.exit(0);
   }
 };
 

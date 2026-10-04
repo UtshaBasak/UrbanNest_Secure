@@ -1,8 +1,6 @@
-import dotenv from 'dotenv';
+import '../../config/env.js';
 import mongoose from 'mongoose';
-import connectDB from '../config/db.js';
-
-dotenv.config({ path: '../.env' });
+import connectDB from '../../config/db.js';
 
 async function run() {
   try {

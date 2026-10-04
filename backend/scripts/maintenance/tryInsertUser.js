@@ -1,15 +1,13 @@
-import dotenv from 'dotenv';
-import connectDB from '../config/db.js';
-import { initializeAllKeys } from '../crypto/keyManager.js';
-import User from '../models/User.js';
-
-dotenv.config({ path: '../.env' });
+import '../../config/env.js';
+import connectDB from '../../config/db.js';
+import { initializeAllKeys } from '../../crypto/keyManager.js';
+import User from '../../models/User.js';
 
 async function run() {
   const email = process.argv[2];
   const password = process.argv[3] || 'Test1234';
   if (!email) {
-    console.error('Usage: node scripts/tryInsertUser.js <email> [password]');
+    console.error('Usage: node scripts/maintenance/tryInsertUser.js <email> [password]');
     process.exit(2);
   }
   try {

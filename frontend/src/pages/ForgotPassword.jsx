@@ -39,7 +39,7 @@ const ForgotPassword = () => {
     e.preventDefault();
     if (!otp || otp.length !== 6) { setError('Enter the 6-digit code'); return; }
     if (newPassword.length < 12) { setError('Password must be at least 12 characters'); return; }
-    if (!/[a-z]/.test(newPassword) || !/[A-Z]/.test(newPassword) || !/[0-9]/.test(newPassword) || !/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(newPassword)) {
+    if (!/[a-z]/.test(newPassword) || !/[A-Z]/.test(newPassword) || !/[0-9]/.test(newPassword) || !/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(newPassword)) {
       setError('Password must contain uppercase, lowercase, digit, and special character'); return;
     }
     if (newPassword !== confirmPassword) { setError('Passwords do not match'); return; }

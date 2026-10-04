@@ -55,70 +55,55 @@ export const AuthProvider = ({ children }) => {
   };
 
   const login = async (email, password) => {
-    try {
-      const response = await authAPI.login(email, password);
-      if (response.requires2FA) {
-        setRequires2FA(true);
-        setTempToken(response.tempToken);
-        return { requires2FA: true };
-      }
-      setUser(response.data.user);
-      if (response.passwordExpired) {
-        setPasswordExpired(true);
-      }
-      return response.data;
-    } catch (error) {
-      throw error;
+    const response = await authAPI.login(email, password);
+    if (response.requires2FA) {
+      setRequires2FA(true);
+      setTempToken(response.tempToken);
+      return { requires2FA: true };
     }
+    setUser(response.data.user);
+    if (response.passwordExpired) {
+      setPasswordExpired(true);
+    }
+    return response.data;
   };
 
   const complete2FA = async (otp) => {
-    try {
-      const response = await authAPI.verify2FA(tempToken, otp);
-      setUser(response.data.user);
-      setRequires2FA(false);
-      setTempToken(null);
-      if (response.passwordExpired) {
-        setPasswordExpired(true);
-      }
-      return response.data;
-    } catch (error) {
-      throw error;
+    const response = await authAPI.verify2FA(tempToken, otp);
+    setUser(response.data.user);
+    setRequires2FA(false);
+    setTempToken(null);
+    if (response.passwordExpired) {
+      setPasswordExpired(true);
     }
+    return response.data;
   };
 
   const register = async (userData) => {
-    try {
-      const response = await authAPI.register(userData);
-      setUser(response.data.user);
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
+    const response = await authAPI.register(userData);
+    setUser(response.data.user);
+    return response.data;
   };
 
   const logout = async () => {
     try {
       await authAPI.logout();
+    } catch {
+      // Clear local session state even if the server call fails
+    } finally {
       setUser(null);
       setRequires2FA(false);
       setTempToken(null);
       setPasswordExpired(false);
-    } catch (error) {
-      setUser(null);
     }
   };
 
   const updateProfile = async (profileData) => {
-    try {
-      const userId = user?._id || user?.id;
-      if (!userId) throw new Error('No user');
-      const response = await authAPI.updateProfile(userId, profileData);
-      setUser(response.data.user);
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
+    const userId = user?._id || user?.id;
+    if (!userId) throw new Error('No user');
+    const response = await authAPI.updateProfile(userId, profileData);
+    setUser(response.data.user);
+    return response.data;
   };
 
   const clearPasswordExpired = () => setPasswordExpired(false);

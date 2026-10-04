@@ -43,14 +43,9 @@ const getBookingStatusColor = (status) => {
   }
 };
 
-const Dashboard = () => {
+// Owner / tenant dashboard
+const UserDashboard = () => {
   const { user } = useAuth();
-  
-  // If user is admin, render admin dashboard
-  if (user?.role === 'admin') {
-    return <AdminDashboard />;
-  }
-  
   const location = useLocation();
   const [activeTab, setActiveTab] = useState('overview');
   const [data, setData] = useState({
@@ -640,4 +635,12 @@ const Dashboard = () => {
     </div>
   );
 };
+
+// Admins get a dedicated dashboard. Kept as a separate component so the
+// hooks in UserDashboard are never called conditionally.
+const Dashboard = () => {
+  const { user } = useAuth();
+  return user?.role === 'admin' ? <AdminDashboard /> : <UserDashboard />;
+};
+
 export default Dashboard;
