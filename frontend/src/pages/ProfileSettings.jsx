@@ -128,7 +128,7 @@ const ProfileSettings = () => {
 
         {emailSuccess && (
           <div className="mb-4 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 rounded-lg flex items-center space-x-3">
-            <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
+            <CheckCircle className="w-5 h-5 text-green-600 shrink-0" />
             <span className="text-green-700 dark:text-green-300 text-sm">{emailSuccess}</span>
           </div>
         )}
@@ -212,7 +212,7 @@ const ProfileSettings = () => {
             </div>
             <button onClick={() => { setTfaModal(true); setTfaError(''); setTfaPassword(''); }}
               className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${user.twoFactorEnabled ? 'bg-green-500' : 'bg-neutral-300 dark:bg-neutral-600'}`}>
-              <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform shadow ${user.twoFactorEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+              <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform shadow-sm ${user.twoFactorEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
             </button>
           </div>
         </div>
@@ -231,7 +231,7 @@ const ProfileSettings = () => {
                 {ownerProps.map(p => (
                   <div key={p._id} className="flex items-center justify-between border border-neutral-200 dark:border-neutral-700 rounded-lg p-3">
                     <div className="flex items-center space-x-3">
-                      <img src={p.images?.[0] || '/api/placeholder/80/80'} alt={p.title} className="w-14 h-14 object-cover rounded" />
+                      <img src={p.images?.[0] || '/api/placeholder/80/80'} alt={p.title} className="w-14 h-14 object-cover rounded-sm" />
                       <div><div className="font-medium text-neutral-900 dark:text-white">{p.title}</div><div className="text-sm text-neutral-600 dark:text-neutral-400">{p.location}</div></div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -254,7 +254,7 @@ const ProfileSettings = () => {
             <button onClick={closeEmailModal} className="absolute top-4 right-4 text-neutral-400 hover:text-neutral-600"><X className="w-5 h-5" /></button>
             {emailError && (
               <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 rounded-lg flex items-center space-x-2">
-                <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" /><span className="text-red-700 dark:text-red-300 text-sm">{emailError}</span>
+                <AlertCircle className="w-4 h-4 text-red-600 shrink-0" /><span className="text-red-700 dark:text-red-300 text-sm">{emailError}</span>
               </div>
             )}
             {emailModal === 'password' && (
@@ -264,7 +264,7 @@ const ProfileSettings = () => {
                 <div className="relative mb-4">
                   <Lock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
                   <input type="password" value={emailPassword} onChange={(e) => { setEmailPassword(e.target.value); setEmailError(''); }} autoFocus
-                    className="w-full h-11 rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-cyan-600 pl-12"
+                    className="w-full h-11 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-hidden focus:ring-2 focus:ring-cyan-600 pl-12"
                     placeholder="Current password" />
                 </div>
                 <button onClick={() => { if (!emailPassword) { setEmailError('Password required'); return; } setEmailModal('newEmail'); }}
@@ -277,7 +277,7 @@ const ProfileSettings = () => {
                 <div className="relative mb-4">
                   <Mail className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
                   <input type="email" value={newEmail} onChange={(e) => { setNewEmail(e.target.value); setEmailError(''); }} autoFocus
-                    className="w-full h-11 rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-cyan-600 pl-12"
+                    className="w-full h-11 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-hidden focus:ring-2 focus:ring-cyan-600 pl-12"
                     placeholder="Enter new email" />
                 </div>
                 <button onClick={handleEmailSendOtp} disabled={emailLoading}
@@ -293,7 +293,7 @@ const ProfileSettings = () => {
                 <div className="relative mb-4">
                   <KeyRound className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
                   <input type="text" value={emailOtp} onChange={(e) => setEmailOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} maxLength={6} autoFocus
-                    className="w-full h-12 rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 text-center text-2xl tracking-[0.5em] font-mono focus:outline-none focus:ring-2 focus:ring-cyan-600 pl-12" placeholder="000000" />
+                    className="w-full h-12 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 text-center text-2xl tracking-[0.5em] font-mono focus:outline-hidden focus:ring-2 focus:ring-cyan-600 pl-12" placeholder="000000" />
                 </div>
                 <button onClick={handleEmailVerifyOtp} disabled={emailLoading || emailOtp.length !== 6}
                   className="w-full bg-cyan-600 hover:bg-cyan-700 text-white py-2.5 rounded-lg font-medium disabled:opacity-50">
@@ -318,13 +318,13 @@ const ProfileSettings = () => {
             <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-4">Enter your password to confirm this change.</p>
             {tfaError && (
               <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 rounded-lg flex items-center space-x-2">
-                <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" /><span className="text-red-700 dark:text-red-300 text-sm">{tfaError}</span>
+                <AlertCircle className="w-4 h-4 text-red-600 shrink-0" /><span className="text-red-700 dark:text-red-300 text-sm">{tfaError}</span>
               </div>
             )}
             <div className="relative mb-4">
               <Lock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
               <input type="password" value={tfaPassword} onChange={(e) => { setTfaPassword(e.target.value); setTfaError(''); }} autoFocus
-                className="w-full h-11 rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-cyan-600 pl-12"
+                className="w-full h-11 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-hidden focus:ring-2 focus:ring-cyan-600 pl-12"
                 placeholder="Enter your password" />
             </div>
             <button onClick={handleToggle2FA} disabled={tfaLoading || !tfaPassword}
@@ -348,13 +348,13 @@ const ProfileSettings = () => {
             <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-4">Are you sure you want to delete your profile? This action cannot be undone. Enter your password to confirm.</p>
             {deleteError && (
               <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 rounded-lg flex items-center space-x-2">
-                <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" /><span className="text-red-700 dark:text-red-300 text-sm">{deleteError}</span>
+                <AlertCircle className="w-4 h-4 text-red-600 shrink-0" /><span className="text-red-700 dark:text-red-300 text-sm">{deleteError}</span>
               </div>
             )}
             <div className="relative mb-4">
               <Lock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
               <input type="password" value={deletePassword} onChange={(e) => { setDeletePassword(e.target.value); setDeleteError(''); }} autoFocus
-                className="w-full h-11 rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-red-600 pl-12"
+                className="w-full h-11 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-hidden focus:ring-2 focus:ring-red-600 pl-12"
                 placeholder="Enter your password" />
             </div>
             <button onClick={handleDeleteAccount} disabled={deleteLoading || !deletePassword}

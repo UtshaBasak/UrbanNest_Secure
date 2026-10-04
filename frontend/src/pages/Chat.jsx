@@ -361,7 +361,7 @@ const Chat = () => {
                     onChange={(e) => setMessageText(e.target.value)}
                     placeholder="Type your message..."
                     maxLength={2000}
-                    className="flex-1 rounded-3xl border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-900 px-4 py-3 text-sm text-neutral-900 dark:text-white focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
+                    className="flex-1 rounded-3xl border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-900 px-4 py-3 text-sm text-neutral-900 dark:text-white focus:border-cyan-500 focus:outline-hidden focus:ring-2 focus:ring-cyan-500/20"
                   />
                   <button
                     type="submit"

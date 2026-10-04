@@ -36,7 +36,7 @@ export const createRating = async (req, res) => {
     const updated = await UserRating.findOneAndUpdate(
       { ratee: rateeId, rater: raterId, context },
       { $set: { rating, comment } },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
+      { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true }
     );
     const status = existing ? 200 : 201;
     res.status(status).json({ data: { rating: updated, updated: !!existing } });

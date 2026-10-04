@@ -194,12 +194,12 @@ const UserDashboard = () => {
       <div className="min-h-screen bg-neutral-50 dark:bg-neutral-900 py-8">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="animate-pulse">
-            <div className="h-8 bg-neutral-200 dark:bg-neutral-700 rounded w-1/4 mb-6"></div>
+            <div className="h-8 bg-neutral-200 dark:bg-neutral-700 rounded-sm w-1/4 mb-6"></div>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
               {[...Array(4)].map((_, i) => (
                 <div key={i} className="bg-white dark:bg-neutral-800 rounded-lg shadow-md p-6">
-                  <div className="h-4 bg-neutral-200 dark:bg-neutral-700 rounded mb-2"></div>
-                  <div className="h-8 bg-neutral-200 dark:bg-neutral-700 rounded"></div>
+                  <div className="h-4 bg-neutral-200 dark:bg-neutral-700 rounded-sm mb-2"></div>
+                  <div className="h-8 bg-neutral-200 dark:bg-neutral-700 rounded-sm"></div>
                 </div>
               ))}
             </div>

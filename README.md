@@ -8,12 +8,12 @@
 
 Owners list properties, tenants book and review them, and every piece of personal data is encrypted before it reaches the database. RSA, ECC, SHA-512 and CBC-MAC are written from scratch with JavaScript `BigInt` arithmetic.
 
-![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933?logo=node.js&logoColor=white)
-![Express](https://img.shields.io/badge/Express-4-000000?logo=express&logoColor=white)
-![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)
-![Vite](https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white)
-![MongoDB](https://img.shields.io/badge/MongoDB-Mongoose%208-47A248?logo=mongodb&logoColor=white)
-![Tailwind CSS](https://img.shields.io/badge/Tailwind%20CSS-3-06B6D4?logo=tailwindcss&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933?logo=node.js&logoColor=white)
+![Express](https://img.shields.io/badge/Express-5-000000?logo=express&logoColor=white)
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
+![Vite](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white)
+![MongoDB](https://img.shields.io/badge/MongoDB-Mongoose%209-47A248?logo=mongodb&logoColor=white)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind%20CSS-4-06B6D4?logo=tailwindcss&logoColor=white)
 [![CodeQL](https://github.com/UtshaBasak/UrbanNest_Secure/actions/workflows/codeql.yml/badge.svg)](https://github.com/UtshaBasak/UrbanNest_Secure/actions/workflows/codeql.yml)
 
 </div>
@@ -98,11 +98,11 @@ All primitives live in [`backend/crypto/`](backend/crypto) and are implemented b
 
 | Layer | Technology |
 | :--- | :--- |
-| Frontend | React 18, React Router 7, Vite 7, Tailwind CSS 3, Lucide icons |
-| Backend | Node.js (ES modules), Express 4, Helmet, express-rate-limit, express-validator, Nodemailer |
-| Database | MongoDB with Mongoose 8 |
+| Frontend | React 19, React Router 7, Vite 8, Tailwind CSS 4, Lucide icons |
+| Backend | Node.js (ES modules), Express 5, Helmet, express-rate-limit, express-validator, Nodemailer |
+| Database | MongoDB with Mongoose 9 |
 | Cryptography | From-scratch RSA, secp256k1 ECC, SHA-512 and CBC-MAC (`BigInt`) |
-| Tooling | ESLint 9, Nodemon, Concurrently, GitHub CodeQL, Dependabot |
+| Tooling | ESLint 10, Nodemon, Concurrently, GitHub CodeQL, Dependabot |
 
 ## Project structure
 
@@ -138,7 +138,7 @@ UrbanNest_Secure/
 
 ### Prerequisites
 
-- **Node.js 18+** and npm
+- **Node.js 22+** and npm
 - **MongoDB**, either a local instance or a [MongoDB Atlas](https://www.mongodb.com/atlas) cluster
 - An **SMTP account** for OTP e-mails. Gmail needs an [App Password](https://support.google.com/accounts/answer/185833).
 

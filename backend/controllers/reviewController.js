@@ -76,7 +76,8 @@ export const createReview = async (req, res) => {
 // @access Private (Tenant)
 export const canReviewCheck = async (req, res) => {
   try {
-    const { propertyId } = req.query;
+    // Accepts ?propertyId= or the /can-review/:propertyId path parameter
+    const propertyId = req.params.propertyId || req.query.propertyId;
     if (!propertyId) return res.status(400).json({ message: 'propertyId is required' });
     const hasBooking = await Booking.findOne({
       tenant: req.user._id,

@@ -41,7 +41,7 @@ const ForceChangePassword = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center py-12 px-4 bg-gradient-to-br from-primary-50 via-white to-secondary-50 dark:from-neutral-900 dark:via-neutral-800 dark:to-neutral-900">
+    <div className="min-h-screen flex items-center justify-center py-12 px-4 bg-linear-to-br from-primary-50 via-white to-secondary-50 dark:from-neutral-900 dark:via-neutral-800 dark:to-neutral-900">
       <div className="w-full max-w-md">
         <div className="card p-8 animate-slide-up">
           <div className="text-center mb-8">
@@ -51,7 +51,7 @@ const ForceChangePassword = () => {
           </div>
           {error && (
             <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 rounded-lg flex items-center space-x-3">
-              <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" /><span className="text-red-700 dark:text-red-300 text-sm">{error}</span>
+              <AlertCircle className="w-5 h-5 text-red-600 shrink-0" /><span className="text-red-700 dark:text-red-300 text-sm">{error}</span>
             </div>
           )}
           <form onSubmit={handleSubmit} className="space-y-5">
@@ -60,7 +60,7 @@ const ForceChangePassword = () => {
               <div className="relative">
                 <Lock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
                 <input type="password" value={currentPw} onChange={(e) => { setCurrentPw(e.target.value); setError(''); }}
-                  className="w-full h-11 rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-cyan-600 pl-12"
+                  className="w-full h-11 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-hidden focus:ring-2 focus:ring-cyan-600 pl-12"
                   placeholder="Enter current password" />
               </div>
             </div>
@@ -69,7 +69,7 @@ const ForceChangePassword = () => {
               <div className="relative">
                 <Lock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
                 <input type={showPw ? 'text' : 'password'} value={newPw} onChange={(e) => setNewPw(e.target.value)}
-                  className="w-full h-11 rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-cyan-600 pl-12 pr-12"
+                  className="w-full h-11 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-hidden focus:ring-2 focus:ring-cyan-600 pl-12 pr-12"
                   placeholder="Min. 12 characters" />
                 <button type="button" onClick={() => setShowPw(!showPw)} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400">
                   {showPw ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
@@ -89,7 +89,7 @@ const ForceChangePassword = () => {
               <div className="relative">
                 <Lock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
                 <input type="password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)}
-                  className="w-full h-11 rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-cyan-600 pl-12"
+                  className="w-full h-11 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-hidden focus:ring-2 focus:ring-cyan-600 pl-12"
                   placeholder="Confirm new password" />
               </div>
               {confirmPw && newPw === confirmPw && (

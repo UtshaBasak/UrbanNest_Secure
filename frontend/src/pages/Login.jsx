@@ -46,7 +46,7 @@ const Login = () => {
 
   if (show2FA) {
     return (
-      <div className="min-h-screen flex items-center justify-center py-12 px-4 bg-gradient-to-br from-primary-50 via-white to-secondary-50 dark:from-neutral-900 dark:via-neutral-800 dark:to-neutral-900">
+      <div className="min-h-screen flex items-center justify-center py-12 px-4 bg-linear-to-br from-primary-50 via-white to-secondary-50 dark:from-neutral-900 dark:via-neutral-800 dark:to-neutral-900">
         <div className="w-full max-w-md">
           <div className="card p-8 animate-slide-up">
             <div className="text-center mb-8">
@@ -56,7 +56,7 @@ const Login = () => {
             </div>
             {error && (
               <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 rounded-lg flex items-center space-x-3">
-                <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" /><span className="text-red-700 dark:text-red-300 text-sm">{error}</span>
+                <AlertCircle className="w-5 h-5 text-red-600 shrink-0" /><span className="text-red-700 dark:text-red-300 text-sm">{error}</span>
               </div>
             )}
             <form onSubmit={handle2FASubmit} className="space-y-6">
@@ -65,7 +65,7 @@ const Login = () => {
                 <div className="relative">
                   <KeyRound className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
                   <input type="text" value={otpCode} onChange={(e) => { setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6)); if (error) setError(''); }} maxLength={6} placeholder="000000" autoFocus
-                    className="w-full rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 px-4 py-3 pl-11 text-center text-2xl tracking-[0.5em] font-mono focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+                    className="w-full rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 px-4 py-3 pl-11 text-center text-2xl tracking-[0.5em] font-mono focus:outline-hidden focus:ring-2 focus:ring-cyan-500" />
                 </div>
               </div>
               <button type="submit" disabled={loading || otpCode.length !== 6} className="w-full btn btn-primary py-3 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed">
@@ -82,7 +82,7 @@ const Login = () => {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center py-12 px-4 bg-gradient-to-br from-primary-50 via-white to-secondary-50 dark:from-neutral-900 dark:via-neutral-800 dark:to-neutral-900">
+    <div className="min-h-screen flex items-center justify-center py-12 px-4 bg-linear-to-br from-primary-50 via-white to-secondary-50 dark:from-neutral-900 dark:via-neutral-800 dark:to-neutral-900">
       <div className="w-full max-w-md">
         <div className="card p-8 animate-slide-up">
           <div className="text-center mb-8">
@@ -91,7 +91,7 @@ const Login = () => {
           </div>
           {error && (
             <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 rounded-lg flex items-center space-x-3 animate-slide-up">
-              <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" /><span className="text-red-700 dark:text-red-300 text-sm">{error}</span>
+              <AlertCircle className="w-5 h-5 text-red-600 shrink-0" /><span className="text-red-700 dark:text-red-300 text-sm">{error}</span>
             </div>
           )}
           <form onSubmit={handleSubmit} className="space-y-6" autoComplete="off" noValidate>
@@ -100,7 +100,7 @@ const Login = () => {
               <div className="relative">
                 <Mail className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
                 <input type="email" id="login-email" name="email" value={formData.email} onChange={handleChange} required autoComplete="off"
-                  className="w-full rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 px-4 py-3 pl-11 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  className="w-full rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 px-4 py-3 pl-11 focus:outline-hidden focus:ring-2 focus:ring-primary-500"
                   placeholder="Enter your email address" />
               </div>
             </div>
@@ -112,7 +112,7 @@ const Login = () => {
               <div className="relative">
                 <Lock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
                 <input type={showPassword ? 'text' : 'password'} id="login-password" name="password" value={formData.password} onChange={handleChange} required autoComplete="new-password"
-                  className="w-full rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 px-4 py-3 pl-11 pr-11 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  className="w-full rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 px-4 py-3 pl-11 pr-11 focus:outline-hidden focus:ring-2 focus:ring-primary-500"
                   placeholder="Enter your password" />
                 <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 transform -translate-y-1/2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300">
                   {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}

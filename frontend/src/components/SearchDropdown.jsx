@@ -108,7 +108,7 @@ const SearchDropdown = ({ query, onClose }) => {
                   onClick={onClose}
                   className="flex items-center space-x-3 px-3 py-3 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-xl transition-all duration-200"
                 >
-                  <div className="w-10 h-10 bg-gradient-to-br from-primary-500 to-secondary-500 rounded-full flex items-center justify-center text-white font-semibold">
+                  <div className="w-10 h-10 bg-linear-to-br from-primary-500 to-secondary-500 rounded-full flex items-center justify-center text-white font-semibold">
                     {owner.name.charAt(0).toUpperCase()}
                   </div>
                   <div className="flex-1">
@@ -141,7 +141,7 @@ const SearchDropdown = ({ query, onClose }) => {
                   onClick={onClose}
                   className="flex items-center space-x-3 px-3 py-3 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-xl transition-all duration-200"
                 >
-                  <div className="w-10 h-10 bg-gradient-to-br from-secondary-500 to-accent-500 rounded-full flex items-center justify-center text-white font-semibold">
+                  <div className="w-10 h-10 bg-linear-to-br from-secondary-500 to-accent-500 rounded-full flex items-center justify-center text-white font-semibold">
                     {tenant.name.charAt(0).toUpperCase()}
                   </div>
                   <div className="flex-1">

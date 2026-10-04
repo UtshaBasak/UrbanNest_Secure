@@ -126,7 +126,7 @@ const Owners = () => {
                 placeholder="Search by name or email…"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="w-full h-11 pl-10 pr-10 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white placeholder-neutral-400 focus:outline-none focus:ring-2 focus:ring-cyan-500 text-sm transition-shadow"
+                className="w-full h-11 pl-10 pr-10 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white placeholder-neutral-400 focus:outline-hidden focus:ring-2 focus:ring-cyan-500 text-sm transition-shadow"
               />
               {searchQuery && (
                 <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200">
@@ -140,7 +140,7 @@ const Owners = () => {
               <select
                 value={minRating}
                 onChange={e => setMinRating(Number(e.target.value))}
-                className="h-11 pl-4 pr-8 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 appearance-none cursor-pointer"
+                className="h-11 pl-4 pr-8 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white text-sm focus:outline-hidden focus:ring-2 focus:ring-cyan-500 appearance-none cursor-pointer"
               >
                 <option value={0}>Any Rating</option>
                 <option value={1}>★ 1+</option>
@@ -156,7 +156,7 @@ const Owners = () => {
             <div className="relative">
               <button
                 onClick={() => setSortOpen(p => !p)}
-                className="h-11 flex items-center gap-2 px-4 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-700 dark:text-neutral-200 text-sm hover:bg-neutral-50 dark:hover:bg-neutral-700 focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-colors whitespace-nowrap"
+                className="h-11 flex items-center gap-2 px-4 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-700 dark:text-neutral-200 text-sm hover:bg-neutral-50 dark:hover:bg-neutral-700 focus:outline-hidden focus:ring-2 focus:ring-cyan-500 transition-colors whitespace-nowrap"
               >
                 <SlidersHorizontal className="w-4 h-4" />
                 {selectedSortLabel}
@@ -182,12 +182,12 @@ const Owners = () => {
           {loading ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
               {[...Array(6)].map((_, i) => (
-                <div key={i} className="bg-white dark:bg-neutral-800 rounded-2xl shadow p-6 animate-pulse">
+                <div key={i} className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm p-6 animate-pulse">
                   <div className="flex items-center gap-4 mb-4">
                     <div className="w-14 h-14 rounded-full bg-neutral-200 dark:bg-neutral-700" />
                     <div className="flex-1 space-y-2">
-                      <div className="h-4 bg-neutral-200 dark:bg-neutral-700 rounded w-3/4" />
-                      <div className="h-3 bg-neutral-200 dark:bg-neutral-700 rounded w-1/2" />
+                      <div className="h-4 bg-neutral-200 dark:bg-neutral-700 rounded-sm w-3/4" />
+                      <div className="h-3 bg-neutral-200 dark:bg-neutral-700 rounded-sm w-1/2" />
                     </div>
                   </div>
                 </div>
@@ -203,12 +203,12 @@ const Owners = () => {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
               {filteredOwners.map((o) => (
-                <div key={o._id} className="group bg-white dark:bg-neutral-800 rounded-2xl shadow hover:shadow-lg transition-shadow p-6 flex flex-col">
+                <div key={o._id} className="group bg-white dark:bg-neutral-800 rounded-2xl shadow-sm hover:shadow-lg transition-shadow p-6 flex flex-col">
                   <div className="flex items-center gap-4 mb-4">
                     {o.profileImage ? (
                       <img src={o.profileImage} alt={o.name || 'Owner'} className="w-14 h-14 rounded-full object-cover ring-2 ring-neutral-100 dark:ring-neutral-700" />
                     ) : (
-                      <div className="w-14 h-14 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-white text-xl font-bold flex-shrink-0">
+                      <div className="w-14 h-14 rounded-full bg-linear-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-white text-xl font-bold shrink-0">
                         {(o.name || 'U').charAt(0).toUpperCase()}
                       </div>
                     )}
@@ -255,10 +255,10 @@ const Owners = () => {
             <h3 className="text-lg font-semibold text-neutral-900 dark:text-white mb-4">Rate {rateModal.target.name}</h3>
             <label className="block text-sm text-neutral-700 dark:text-neutral-300 mb-2">Rating (1–5)</label>
             <input type="number" min={1} max={5} value={ratingValue} onChange={e => setRatingValue(e.target.value)}
-              className="w-full mb-4 rounded-lg border border-neutral-300 dark:border-neutral-600 bg-transparent px-3 py-2 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+              className="w-full mb-4 rounded-lg border border-neutral-300 dark:border-neutral-600 bg-transparent px-3 py-2 text-neutral-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-cyan-500" />
             <label className="block text-sm text-neutral-700 dark:text-neutral-300 mb-2">Comment (optional)</label>
             <textarea value={ratingComment} onChange={e => setRatingComment(e.target.value)} rows={3}
-              className="w-full mb-4 rounded-lg border border-neutral-300 dark:border-neutral-600 bg-transparent px-3 py-2 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+              className="w-full mb-4 rounded-lg border border-neutral-300 dark:border-neutral-600 bg-transparent px-3 py-2 text-neutral-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-cyan-500" />
             <div className="flex justify-end gap-3">
               <button onClick={() => setRateModal({ open: false, target: null })} disabled={submitting}
                 className="rounded-lg border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-700 py-2 px-4 text-sm transition-colors">

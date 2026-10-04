@@ -125,7 +125,7 @@ const Register = () => {
 
   if (step === 2) {
     return (
-      <div className="min-h-screen flex items-center justify-center py-12 px-4 bg-gradient-to-br from-primary-50 via-white to-secondary-50 dark:from-neutral-900 dark:via-neutral-800 dark:to-neutral-900">
+      <div className="min-h-screen flex items-center justify-center py-12 px-4 bg-linear-to-br from-primary-50 via-white to-secondary-50 dark:from-neutral-900 dark:via-neutral-800 dark:to-neutral-900">
         <div className="w-full max-w-md">
           <div className="card p-8 animate-slide-up">
             <div className="text-center mb-8">
@@ -135,7 +135,7 @@ const Register = () => {
             </div>
             {errors.submit && (
               <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 rounded-lg flex items-center space-x-3">
-                <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" /><span className="text-red-700 dark:text-red-300 text-sm">{errors.submit}</span>
+                <AlertCircle className="w-5 h-5 text-red-600 shrink-0" /><span className="text-red-700 dark:text-red-300 text-sm">{errors.submit}</span>
               </div>
             )}
             <form onSubmit={handleOtpSubmit} className="space-y-6">
@@ -144,7 +144,7 @@ const Register = () => {
                 <div className="relative">
                   <KeyRound className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
                   <input type="text" value={otpCode} onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))} maxLength={6} placeholder="000000" autoFocus
-                    className="w-full h-14 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 text-center text-3xl tracking-[0.6em] font-mono focus:outline-none focus:ring-2 focus:ring-cyan-600 pl-12" />
+                    className="w-full h-14 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 text-center text-3xl tracking-[0.6em] font-mono focus:outline-hidden focus:ring-2 focus:ring-cyan-600 pl-12" />
                 </div>
               </div>
               <button type="submit" disabled={loading || otpCode.length !== 6} className="w-full inline-flex items-center justify-center rounded-md bg-cyan-600 hover:bg-cyan-700 text-white py-3 font-medium disabled:opacity-50">
@@ -162,14 +162,14 @@ const Register = () => {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center py-12 px-4 bg-gradient-to-br from-primary-50 via-white to-secondary-50 dark:from-neutral-900 dark:via-neutral-800 dark:to-neutral-900">
+    <div className="min-h-screen flex items-center justify-center py-12 px-4 bg-linear-to-br from-primary-50 via-white to-secondary-50 dark:from-neutral-900 dark:via-neutral-800 dark:to-neutral-900">
       <PasswordPolicyPopup open={showPolicyPopup} onClose={() => setShowPolicyPopup(false)} />
       <div className="w-full max-w-md">
         <div className="card p-8 animate-slide-up">
           <div className="text-center mb-8"><h1 className="text-3xl font-bold gradient-text mb-2">Create Your Account</h1></div>
           {errors.submit && (
             <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 rounded-lg flex items-center space-x-3">
-              <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" /><span className="text-red-700 dark:text-red-300 text-sm">{errors.submit}</span>
+              <AlertCircle className="w-5 h-5 text-red-600 shrink-0" /><span className="text-red-700 dark:text-red-300 text-sm">{errors.submit}</span>
             </div>
           )}
           <form onSubmit={handleFormSubmit} className="space-y-5" autoComplete="off" noValidate>
@@ -178,7 +178,7 @@ const Register = () => {
               <div className="relative">
                 <User className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
                 <input type="text" name="name" value={formData.name} onChange={handleChange}
-                  className={`w-full h-11 rounded border ${errors.name ? 'border-red-500' : 'border-neutral-300 dark:border-neutral-700'} bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-cyan-600 pl-12 pr-4`}
+                  className={`w-full h-11 rounded-sm border ${errors.name ? 'border-red-500' : 'border-neutral-300 dark:border-neutral-700'} bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-hidden focus:ring-2 focus:ring-cyan-600 pl-12 pr-4`}
                   placeholder="Enter your full name" />
               </div>
               {errors.name && <p className="text-red-500 text-xs mt-1">{errors.name}</p>}
@@ -188,7 +188,7 @@ const Register = () => {
               <div className="relative">
                 <Mail className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
                 <input type="email" name="email" value={formData.email} onChange={handleChange}
-                  className={`w-full h-11 rounded border ${errors.email ? 'border-red-500' : 'border-neutral-300 dark:border-neutral-700'} bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-cyan-600 pl-12 pr-4`}
+                  className={`w-full h-11 rounded-sm border ${errors.email ? 'border-red-500' : 'border-neutral-300 dark:border-neutral-700'} bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-hidden focus:ring-2 focus:ring-cyan-600 pl-12 pr-4`}
                   placeholder="Enter your email address" />
               </div>
               {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email}</p>}
@@ -205,14 +205,14 @@ const Register = () => {
               <div className="relative">
                 <Phone className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
                 <input type="tel" name="phone" value={formData.phone} onChange={handleChange}
-                  className={`w-full h-11 rounded border ${errors.phone ? 'border-red-500' : 'border-neutral-300 dark:border-neutral-700'} bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-cyan-600 pl-12 pr-4`}
+                  className={`w-full h-11 rounded-sm border ${errors.phone ? 'border-red-500' : 'border-neutral-300 dark:border-neutral-700'} bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-hidden focus:ring-2 focus:ring-cyan-600 pl-12 pr-4`}
                   placeholder="Enter your phone number" />
               </div>
               {errors.phone && <p className="text-red-500 text-xs mt-1">{errors.phone}</p>}
             </div>
             <div>
               <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">Registering as</label>
-              <select name="role" value={formData.role} onChange={handleChange} className="w-full h-11 rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-cyan-600 px-3">
+              <select name="role" value={formData.role} onChange={handleChange} className="w-full h-11 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-hidden focus:ring-2 focus:ring-cyan-600 px-3">
                 <option value="tenant">Tenant</option>
                 <option value="owner">Owner</option>
               </select>
@@ -226,7 +226,7 @@ const Register = () => {
               <div className="relative">
                 <Lock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
                 <input type={showPassword ? 'text' : 'password'} name="password" value={formData.password} onChange={handleChange} autoComplete="new-password"
-                  className={`w-full h-11 rounded border ${errors.password ? 'border-red-500' : 'border-neutral-300 dark:border-neutral-700'} bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-cyan-600 pl-12 pr-12`}
+                  className={`w-full h-11 rounded-sm border ${errors.password ? 'border-red-500' : 'border-neutral-300 dark:border-neutral-700'} bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-hidden focus:ring-2 focus:ring-cyan-600 pl-12 pr-12`}
                   placeholder="Min. 12 characters" />
                 <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400">
                   {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
@@ -258,7 +258,7 @@ const Register = () => {
               <div className="relative">
                 <Lock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
                 <input type={showConfirmPassword ? 'text' : 'password'} name="confirmPassword" value={formData.confirmPassword} onChange={handleChange} autoComplete="new-password"
-                  className={`w-full h-11 rounded border ${errors.confirmPassword ? 'border-red-500' : 'border-neutral-300 dark:border-neutral-700'} bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-cyan-600 pl-12 pr-12`}
+                  className={`w-full h-11 rounded-sm border ${errors.confirmPassword ? 'border-red-500' : 'border-neutral-300 dark:border-neutral-700'} bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-hidden focus:ring-2 focus:ring-cyan-600 pl-12 pr-12`}
                   placeholder="Confirm your password" />
                 <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400">
                   {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}

@@ -41,7 +41,7 @@ app.use(helmet({
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  limit: 100,
   message: 'Too many requests from this IP, please try again later.'
 });
 app.use('/api/auth', limiter);
@@ -75,6 +75,12 @@ app.use(cors({
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+// Express 5 leaves req.body undefined when no body was parsed; controllers
+// destructure it, so keep the Express 4 behaviour of an empty object.
+app.use((req, res, next) => {
+  if (req.body === undefined) req.body = {};
+  next();
+});
 
 // Logging
 if (process.env.NODE_ENV === 'development') {
@@ -124,7 +130,7 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // 404 handler
-app.use('*', (req, res) => {
+app.use((req, res) => {
   res.status(404).json({ message: 'Route not found' });
 });
 

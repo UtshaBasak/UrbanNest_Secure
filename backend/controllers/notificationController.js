@@ -34,7 +34,7 @@ export const markAsRead = async (req, res) => {
     const notif = await Notification.findOneAndUpdate(
       { _id: id, user: req.user._id },
       { $set: { read: true } },
-      { new: true }
+      { returnDocument: 'after' }
     );
     if (!notif) return res.status(404).json({ message: 'Notification not found' });
     res.json({ data: { notification: notif } });
@@ -50,7 +50,7 @@ export const markAsUnread = async (req, res) => {
     const notif = await Notification.findOneAndUpdate(
       { _id: id, user: req.user._id },
       { $set: { read: false } },
-      { new: true }
+      { returnDocument: 'after' }
     );
     if (!notif) return res.status(404).json({ message: 'Notification not found' });
     res.json({ data: { notification: notif } });

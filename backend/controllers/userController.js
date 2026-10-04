@@ -251,7 +251,7 @@ export const searchUsers = async (req, res) => {
 export const updateUserStatus = async (req, res) => {
   try {
     const { isActive } = req.body;
-    const user = await User.findByIdAndUpdate(req.params.id, { isActive }, { new: true }).select('-password');
+    const user = await User.findByIdAndUpdate(req.params.id, { isActive }, { returnDocument: 'after' }).select('-password');
     if (!user) return res.status(404).json({ message: 'User not found' });
     res.json({ message: `User ${isActive ? 'activated' : 'deactivated'} successfully`, data: { user } });
   } catch (error) {

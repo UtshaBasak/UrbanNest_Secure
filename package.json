@@ -9,7 +9,7 @@
     "url": "git+https://github.com/UtshaBasak/UrbanNest_Secure.git"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "scripts": {
     "install:all": "npm install && npm install --prefix backend && npm install --prefix frontend",
