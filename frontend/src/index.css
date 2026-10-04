@@ -149,14 +149,15 @@ NOTE: If you see 'Unknown at rule @tailwind' or '@apply' errors, ensure your bui
 /* Dynamic island navbar */
 .dynamic-island {
   @apply fixed top-4 left-1/2 transform -translate-x-1/2 z-50 px-6 py-3 rounded-full;
-  @apply glass shadow-lg shadow-cyan-500/20;
+  /* Same look as .glass (Tailwind v4 cannot @apply custom classes) */
+  @apply backdrop-blur-xl bg-white/70 border border-white/20 shadow-lg shadow-cyan-500/20;
   -webkit-backdrop-filter: blur(20px); /* Safari 9+, iOS 9+ */
   backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
 .dark .dynamic-island {
-  @apply shadow-cyan-400/20;
+  @apply bg-neutral-900/70 border-neutral-700/50 shadow-cyan-400/20;
   border: 1px solid rgba(99, 102, 241, 0.3);
 }
 
