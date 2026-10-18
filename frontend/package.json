@@ -11,7 +11,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "lucide-react": "^1.52.0",
+    "lucide-react": "^1.56.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-router-dom": "^7.18.4"
@@ -24,9 +24,9 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.7",
     "globals": "^17.13.0",
-    "postcss": "^8.5.29",
+    "postcss": "^8.5.30",
     "tailwindcss": "^4.3.3",
-    "vite": "^8.3.3"
+    "vite": "^8.3.4"
   },
   "engines": {
     "node": ">=20.19"
